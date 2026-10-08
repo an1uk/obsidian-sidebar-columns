@@ -26,7 +26,7 @@ Read [full-height column acceptance](docs/FULL-COLUMN-TEST-RESULTS.md) and [test
 4. The folder contains `main.js`, `manifest.json` and `styles.css`.
 5. Enable Sidebar Columns in Community plugins. Its first layout change asks for experimental consent and writes a protected layout baseline.
 
-Installation does not itself create columns. GitHub releases are experimental prereleases. The plugin has not been submitted to or accepted by the official community directory.
+Installation does not itself create columns. GitHub releases are labelled experimental. Version 0.1.0 is a regular, latest GitHub release so release-discovery tools can find it; that classification does not change the unsupported-layout warning or establish Obsidian community-directory approval.
 
 ## Use
 
