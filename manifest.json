@@ -1,0 +1,10 @@
+{
+  "id": "sidebar-columns",
+  "name": "Sidebar Columns",
+  "version": "0.1.0",
+  "minAppVersion": "1.14.4",
+  "description": "Create experimental side-by-side sidebar columns. Reintroduces a deliberately disabled layout option that may cause visual or compatibility issues.",
+  "author": "Alan",
+  "authorUrl": "https://github.com/an1uk",
+  "isDesktopOnly": true
+}

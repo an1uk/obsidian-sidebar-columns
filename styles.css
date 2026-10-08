@@ -1,0 +1,29 @@
+/* Only plugin-folded native sidebar branches receive these styles. */
+.workspace-split.mod-vertical > .sidebar-columns-collapsed {
+  flex: 0 0 32px !important;
+  width: 32px !important;
+  min-width: 32px !important;
+  max-width: 32px !important;
+  overflow: hidden;
+}
+.sidebar-columns-collapsed > :not(.sidebar-columns-rail) {
+  display: none !important;
+}
+.sidebar-columns-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 32px;
+  height: 100%;
+  background: var(--background-secondary);
+  border-inline-end: 1px solid var(--background-modifier-border);
+}
+.sidebar-columns-restore {
+  margin-top: var(--size-4-2);
+  width: 28px;
+  height: 28px;
+}
+.sidebar-columns-restore:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}

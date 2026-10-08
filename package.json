@@ -1,0 +1,38 @@
+{
+  "name": "sidebar-columns",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Experimental native sidebar columns for Obsidian desktop.",
+  "license": "0BSD",
+  "author": "Alan",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "dev": "node esbuild.config.mjs --watch",
+    "check": "tsc --noEmit",
+    "test": "node tests/run.mjs",
+    "build": "pnpm check && node esbuild.config.mjs",
+    "package": "pnpm build && node scripts/package.mjs",
+    "test:runtime": "node scripts/runtime-test.mjs --run",
+    "test:recovery": "node scripts/runtime-recovery.mjs --run",
+    "test:workspaces": "node scripts/runtime-workspaces.mjs --run",
+    "test:full-columns": "node scripts/runtime-full-columns.mjs --run"
+  },
+  "devDependencies": {
+    "obsidian": "https://codeload.github.com/obsidianmd/obsidian-api/tar.gz/9abd9605ce081383674aae1ed111c456edde0688",
+    "typescript": "5.9.3",
+    "esbuild": "0.25.5",
+    "happy-dom": "^20.0.0",
+    "@types/node": "^24.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/an1uk/obsidian-sidebar-columns.git"
+  },
+  "bugs": {
+    "url": "https://github.com/an1uk/obsidian-sidebar-columns/issues"
+  },
+  "homepage": "https://github.com/an1uk/obsidian-sidebar-columns#readme"
+}
