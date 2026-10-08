@@ -1,6 +1,6 @@
 # Sidebar Columns
 
-Experimental native columns for the actual left and right Obsidian sidebars. Desktop only. Version 0.1.0.
+Experimental native columns for the actual left and right Obsidian sidebars. Desktop only. Version 0.1.1.
 
 **This reintroduces a deliberately disabled, unsupported layout arrangement.** Sidebar column splitting became accessible when central-workspace tab-management code was reused for sidebar tabs. Obsidian intentionally removed the sidebar “Split right” action in [1.6.4 on 20 June 2024](https://obsidian.md/changelog/2024-06-20-desktop-v1.6.4/). [WhiteNoise’s explanation](https://forum.obsidian.md/t/unable-to-perform-split-right-in-a-left-leaf/84130/4) states that multiple sidebar columns were never officially supported or considered when designing themes and interactions.
 
@@ -21,12 +21,13 @@ Read [full-height column acceptance](docs/FULL-COLUMN-TEST-RESULTS.md) and [test
 ## Install
 
 1. Start in a disposable test vault and preserve your current workspace.
-2. Download [sidebar-columns-0.1.0.zip](https://github.com/an1uk/obsidian-sidebar-columns/releases/download/0.1.0/sidebar-columns-0.1.0.zip) from the [experimental 0.1.0 release](https://github.com/an1uk/obsidian-sidebar-columns/releases/tag/0.1.0), or build locally.
-3. Extract its `sidebar-columns` folder into `<vault configuration directory>/plugins/`. The default configuration directory is `.obsidian`; use the actual directory if you changed it.
-4. The folder contains `main.js`, `manifest.json` and `styles.css`.
-5. Enable Sidebar Columns in Community plugins. Its first layout change asks for experimental consent and writes a protected layout baseline.
+2. Download `main.js`, `manifest.json` and `styles.css` from the [experimental 0.1.1 release](https://github.com/an1uk/obsidian-sidebar-columns/releases/tag/0.1.1).
+3. Create `sidebar-columns` under `<vault configuration directory>/plugins/` and put those three files inside. The default configuration directory is `.obsidian`; use the actual directory if you changed it.
+4. Enable Sidebar Columns in Community plugins. Its first layout change asks for experimental consent and writes a protected layout baseline.
 
-Installation does not itself create columns. GitHub releases are labelled experimental. Version 0.1.0 is a regular, latest GitHub release so release-discovery tools can find it; that classification does not change the unsupported-layout warning or establish Obsidian community-directory approval.
+For ZIP installation, build locally with `pnpm package` or download the installable ZIP from the [release workflow artifacts](https://github.com/an1uk/obsidian-sidebar-columns/actions/workflows/release.yml). Extract the ZIP’s `sidebar-columns` folder into the same plugins directory. GitHub Actions artifact downloads require a GitHub login.
+
+Installation does not itself create columns. Releases remain labelled experimental and use regular GitHub release status for directory discovery. That classification does not change the unsupported-layout warning or establish Obsidian community-directory approval.
 
 ## Use
 
@@ -86,6 +87,7 @@ Node 24 or later; pnpm 11.25.0:
 
 ```sh
 pnpm install --frozen-lockfile
+pnpm lint
 pnpm check
 pnpm test
 pnpm build
@@ -94,15 +96,19 @@ pnpm package
 
 The Obsidian 1.14.4 API definitions are pinned to official source commit `9abd9605ce081383674aae1ed111c456edde0688`. That API version was not available on npm at implementation time (npm’s latest was 1.13.1), so the lockfile uses the official source archive without substituting older definitions. Only esbuild’s required dependency setup script is allowed.
 
-`pnpm package` writes `dist/sidebar-columns-0.1.0.zip` and checksums. The ZIP contains only the three distributable plugin files, inside `sidebar-columns/`; it contains no notes, credentials, test profiles or workspace backups.
+`pnpm package` writes `dist/sidebar-columns-0.1.1.zip` and checksums. The ZIP contains only the three distributable plugin files, inside `sidebar-columns/`; it contains no notes, credentials, test profiles or workspace backups.
 
 Runtime acceptance harnesses are Windows-only developer tools. Set `SIDEBAR_COLUMNS_SOURCE_VAULT` to an explicit, read-only asset-source vault; the harness copies only distributable Calendar/theme files and hashes configuration content. It never copies notes or saved plugin settings. Set `SIDEBAR_COLUMNS_SOURCE_CONFIG_DIR` if that source vault uses a custom configuration directory. Optional `SIDEBAR_COLUMNS_OBSIDIAN_EXE` and `SIDEBAR_COLUMNS_ASAR` override the normal per-user Windows installation paths. These environment inputs are not needed to build or install the plugin.
 
 `pnpm test:runtime` runs the isolated desktop acceptance harness when the installed executable and the 1.14.4 update archive are available. It uses a separate profile and fixture vault, validates isolation through native IPC before interactions, and records evidence. It does not use global Obsidian CLI or URI forwarding to control the working session. Its usable-center assertion returns nonzero for the documented 900px-window width limit; this is retained as an observed limitation, rather than reported as a pass. Use `pnpm test:runtime --rtl` for actual Arabic RTL acceptance.
 
-Use `pnpm test:full-columns --expected-build-hash <main.js SHA-256>` for full-height default, secondary row splitting and whole-stack collapse acceptance. Use `pnpm test:recovery --expected-build-hash <main.js SHA-256>` for the separate guarded restore, restart and offline recovery harness. Use `pnpm test:workspaces --expected-build-hash <main.js SHA-256>` for core Workspaces, native central splitting and pop-out targeting acceptance.
+Use `pnpm test:review-fix --expected-build-hash <main.js SHA-256>` for current declarative-settings, inline-rail and full-height acceptance (add `--rtl` for Arabic RTL). Use `pnpm test:full-columns --expected-build-hash <main.js SHA-256>` for full-height default, secondary row splitting and whole-stack collapse acceptance. Use `pnpm test:recovery --expected-build-hash <main.js SHA-256>` for the separate guarded restore, restart and offline recovery harness. Use `pnpm test:workspaces --expected-build-hash <main.js SHA-256>` for core Workspaces, native central splitting and pop-out targeting acceptance.
 
 See [full-height results](docs/FULL-COLUMN-TEST-RESULTS.md), [architecture](docs/ARCHITECTURE.md), [manual checklist](docs/MANUAL-TESTS.md), [interaction results](docs/TEST-RESULTS.md) and [recovery results](docs/RECOVERY-TEST-RESULTS.md) and [Workspaces/pop-out results](docs/WORKSPACES-TEST-RESULTS.md).
+
+## Release provenance
+
+The tag-only release workflow builds from the exact version tag, runs the official Obsidian lint rules with zero warnings, checks types and tests, and verifies packaging. GitHub artifact attestations cover the exact main.js, manifest.json and styles.css files. Only those three files are attached to the Obsidian release. The manual-install ZIP, checksums and attestation bundle remain separate Actions artifacts. See [review-fix verification](docs/REVIEW-FIX-TEST-RESULTS.md) for current results; earlier 0.1.0 acceptance documents remain historical evidence.
 
 ## Publication status and privacy
 

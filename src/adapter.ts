@@ -47,6 +47,10 @@ interface NativeWorkspace {
   onDragLeaf(event: DragEvent, leaf: WorkspaceLeaf): void;
   changeLayout(layout: unknown): Promise<void>;
 }
+interface NativeDomWindow extends Window {
+  createDiv: typeof createDiv;
+  createEl: typeof createEl;
+}
 interface NativeCommandRegistry {
   findCommand(id: string): { checkCallback?: (checking: boolean) => boolean | void } | undefined;
 }
@@ -57,6 +61,12 @@ export interface SidebarTarget {
   group: NativeTabs;
   parent: NativeSplit;
 }
+interface FoldStyle {
+  value: string;
+  priority: string;
+  appliedValue: string;
+  appliedPriority: string;
+}
 interface Fold {
   branch: NativeItem;
   parent: NativeSplit;
@@ -66,6 +76,8 @@ interface Fold {
   restore: HTMLButtonElement;
   target: SidebarTarget;
   inert: Map<HTMLElement, boolean>;
+  styles: Map<HTMLElement, Map<string, FoldStyle>>;
+  dimensionDispose?: () => void;
 }
 interface CapturedItem {
   parent: NativeParent | null;
@@ -243,7 +255,7 @@ export class SidebarAdapter {
     if (focused.length > 1) throw new Error(TARGET_MESSAGE);
     if (focused.length === 1) {
       if (focused[0] !== ws.activeLeaf) throw new Error(TARGET_MESSAGE);
-      return this.resolveTarget(focused[0]!);
+      return this.resolveTarget(focused[0]);
     }
     if (activeElement && activeElement !== doc.body) throw new Error(TARGET_MESSAGE);
     if (!ws.activeLeaf) throw new Error(TARGET_MESSAGE);
@@ -395,12 +407,13 @@ export class SidebarAdapter {
   getCollapsedCount(): number { return this.folds.size; }
 
   private isResizeHandle(target: EventTarget | null): boolean {
-    if (!(target instanceof this.workspace.containerEl.ownerDocument.defaultView!.Node)) return false;
+    const win = this.workspace.containerEl.ownerDocument.defaultView;
+    if (!win || !(target instanceof win.Node)) return false;
     const seen = new Set<NativeItem>();
     const walk = (item: NativeItem): boolean => {
       if (!item || seen.has(item) || seen.size >= MAX_ITEMS) return false;
       seen.add(item);
-      if (item.resizeHandleEl === target || item.resizeHandleEl?.contains(target as Node)) return true;
+      if (item.resizeHandleEl === target || item.resizeHandleEl?.contains(target)) return true;
       return Array.isArray((item as NativeParent).children) && (item as NativeParent).children.some(walk);
     };
     return walk(this.workspace.leftSplit) || walk(this.workspace.rightSplit);
@@ -418,7 +431,7 @@ export class SidebarAdapter {
     const seen = new Set<NativeItem>();
     while (parent.children.length === 1 && !seen.has(parent)) {
       seen.add(parent);
-      const child = parent.children[0]!;
+      const child = parent.children[0];
       if (!isSplit(child) || isSidebar(child)) return null;
       const split = child as NativeSplit;
       if (split.direction === 'vertical') return split;
@@ -455,7 +468,13 @@ export class SidebarAdapter {
     return null;
   }
 
+  private foldWindow(doc: Document): NativeDomWindow | null {
+    const win = doc.win as NativeDomWindow | undefined;
+    return win && typeof win.createDiv === 'function' && typeof win.createEl === 'function' ? win : null;
+  }
+
   canCollapse(target: SidebarTarget): boolean {
+    if (!this.foldWindow(target.root.containerEl.ownerDocument)) return false;
     if (this.operationRunning || this.isBusyGesture() || target.root.collapsed) return false;
     const column = this.column(target);
     if (!column || this.folds.has(column.branch) || this.foldContaining(column.parent)) return false;
@@ -465,15 +484,20 @@ export class SidebarAdapter {
 
   collapse(target: SidebarTarget): void {
     this.assertCompatible();
+    const nativeWindow = this.foldWindow(target.root.containerEl.ownerDocument);
+    if (!nativeWindow) throw new Error('The native window cannot create sidebar controls safely. Column collapse is unavailable; splitting remains available.');
     if (!this.canCollapse(target)) throw new Error('This tab has no collapsible sidebar column, or it is the last open column.');
     const { branch, parent } = this.column(target)!;
     for (const fold of [...this.folds.values()]) {
       if (isInside(fold.branch, branch)) this.expandFold(fold, false);
     }
     const doc = branch.containerEl.ownerDocument;
-    const rail = doc.createElement('div');
+    const rail = nativeWindow.createDiv();
     rail.className = 'sidebar-columns-rail';
-    const restore = doc.createElement('button');
+    const restore = nativeWindow.createEl('button');
+    if (rail.ownerDocument !== doc || restore.ownerDocument !== doc) {
+      throw new Error('The sidebar controls belong to a different window. Column collapse is unavailable; splitting remains available.');
+    }
     restore.type = 'button';
     restore.className = 'clickable-icon sidebar-columns-restore';
     restore.setAttribute('aria-label', 'Expand sidebar column');
@@ -481,7 +505,16 @@ export class SidebarAdapter {
     restore.setAttribute('aria-expanded', 'false');
     setIcon(restore, 'panel-left-open');
     rail.appendChild(restore);
-    const fold: Fold = { branch, parent, siblings: parent.children.slice(), root: target.root, rail, restore, target, inert: new Map() };
+    const fold: Fold = { branch, parent, siblings: parent.children.slice(), root: target.root, rail, restore, target,
+      inert: new Map(), styles: new Map() };
+    // The native dimension remains authoritative. This wrapper keeps only the
+    // folded presentation fixed when native code refreshes inline dimensions.
+    fold.dimensionDispose = wrapMethod(branch, 'setDimension', (original, receiver, args) => {
+      try { return Reflect.apply(original, receiver, args); }
+      finally {
+        if (this.folds.get(branch) === fold) this.refreshFoldStyles(fold, branch.containerEl);
+      }
+    });
     const children = (branch as NativeParent).children;
     if (Array.isArray(children)) {
       for (const child of children) {
@@ -491,6 +524,14 @@ export class SidebarAdapter {
     }
     restore.addEventListener('click', () => this.expandFold(fold, true));
     this.folds.set(branch, fold);
+    this.setFoldStyles(fold, branch.containerEl, {
+      'flex-grow': '0', 'flex-shrink': '0', 'flex-basis': '32px',
+      'width': '32px', 'min-width': '32px', 'max-width': '32px',
+    });
+    const win = doc.defaultView;
+    for (const child of Array.from(branch.containerEl.children)) {
+      if (win && child.instanceOf(win.HTMLElement)) this.setFoldStyles(fold, child, { display: 'none' });
+    }
     branch.containerEl.appendChild(rail);
     branch.containerEl.classList.add('sidebar-columns-collapsed');
     const active = this.workspace.activeLeaf;
@@ -501,6 +542,45 @@ export class SidebarAdapter {
     }
     restore.focus({ preventScroll: true });
     this.workspace.requestResize();
+  }
+
+  private setFoldStyles(fold: Fold, element: HTMLElement, values: Record<string, string>): void {
+    const entries = fold.styles.get(element) ?? new Map<string, FoldStyle>();
+    fold.styles.set(element, entries);
+    for (const [property, value] of Object.entries(values)) {
+      const entry: FoldStyle = {
+        value: element.style.getPropertyValue(property), priority: element.style.getPropertyPriority(property),
+        appliedValue: '', appliedPriority: '',
+      };
+      element.style.setProperty(property, value);
+      entry.appliedValue = element.style.getPropertyValue(property);
+      entry.appliedPriority = element.style.getPropertyPriority(property);
+      entries.set(property, entry);
+    }
+  }
+
+  private refreshFoldStyles(fold: Fold, element: HTMLElement): void {
+    for (const [property, entry] of fold.styles.get(element) ?? []) {
+      const value = element.style.getPropertyValue(property), priority = element.style.getPropertyPriority(property);
+      if (value === entry.appliedValue && priority === entry.appliedPriority) continue;
+      // Retain legitimate newer native inline values for expansion, then restore
+      // the scoped rail presentation without touching the stored dimension.
+      entry.value = value;
+      entry.priority = priority;
+      element.style.setProperty(property, entry.appliedValue, entry.appliedPriority);
+    }
+  }
+
+  private restoreFoldStyles(fold: Fold): void {
+    for (const [element, entries] of fold.styles) {
+      for (const [property, entry] of entries) {
+        // A later plugin may own a newer value. Restore only our unchanged value.
+        if (element.style.getPropertyValue(property) !== entry.appliedValue
+          || element.style.getPropertyPriority(property) !== entry.appliedPriority) continue;
+        if (entry.value) element.style.setProperty(property, entry.value, entry.priority);
+        else element.style.removeProperty(property);
+      }
+    }
   }
 
   private firstLeaf(item: NativeItem): WorkspaceLeaf | null {
@@ -529,6 +609,8 @@ export class SidebarAdapter {
     this.folds.delete(fold.branch);
     fold.branch.containerEl.classList.remove('sidebar-columns-collapsed');
     fold.rail.remove();
+    fold.dimensionDispose?.();
+    this.restoreFoldStyles(fold);
     for (const [element, original] of fold.inert) element.inert = original;
     this.workspace.requestResize();
     if (focus) {
@@ -885,7 +967,7 @@ export class SidebarAdapter {
           throw new Error('The sidebar changed during removal; automatic rollback was stopped.');
         }
         // Ratios and focus may have been changed by a user/plugin while the frame was pending.
-        if (ratiosUnchanged) siblings.forEach((node, index) => node.setDimension(dimensions[index]!));
+        if (ratiosUnchanged) siblings.forEach((node, index) => node.setDimension(dimensions[index]));
         if (selectionUnchanged && postSelectedTab === selectedTab) target.group.currentTab = selectedTab;
         if (focusUnchanged && this.workspace.activeLeaf === postActive && active) {
           let stillAttached = false;

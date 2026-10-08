@@ -1,6 +1,6 @@
 {
   "name": "sidebar-columns",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Experimental native sidebar columns for Obsidian desktop.",
   "license": "0BSD",
@@ -18,14 +18,21 @@
     "test:runtime": "node scripts/runtime-test.mjs --run",
     "test:recovery": "node scripts/runtime-recovery.mjs --run",
     "test:workspaces": "node scripts/runtime-workspaces.mjs --run",
-    "test:full-columns": "node scripts/runtime-full-columns.mjs --run"
+    "test:full-columns": "node scripts/runtime-full-columns.mjs --run",
+    "lint": "eslint \"src/**/*.ts\" --max-warnings 0",
+    "test:review-fix": "node scripts/runtime-review-fix.mjs --run"
   },
   "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@eslint/json": "0.14.0",
+    "@types/node": "^24.0.0",
+    "esbuild": "0.25.5",
+    "eslint": "9.39.5",
+    "eslint-plugin-obsidianmd": "0.4.2",
+    "happy-dom": "^20.0.0",
     "obsidian": "https://codeload.github.com/obsidianmd/obsidian-api/tar.gz/9abd9605ce081383674aae1ed111c456edde0688",
     "typescript": "5.9.3",
-    "esbuild": "0.25.5",
-    "happy-dom": "^20.0.0",
-    "@types/node": "^24.0.0"
+    "typescript-eslint": "8.71.1"
   },
   "repository": {
     "type": "git",

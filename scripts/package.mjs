@@ -1,7 +1,7 @@
 import {readFile,writeFile,mkdir} from "node:fs/promises";
 import {createHash} from "node:crypto";
 const manifest=JSON.parse(await readFile("manifest.json","utf8"));
-if(manifest.id!=="sidebar-columns" || manifest.version!=="0.1.0") throw new Error("Unexpected distribution identity");
+if(manifest.id!=="sidebar-columns" || !/^\d+\.\d+\.\d+$/.test(manifest.version)) throw new Error("Unexpected distribution identity");
 const names=["manifest.json","main.js","styles.css"];
 function crc32(buffer){let crc=0xffffffff;for(const byte of buffer){crc^=byte;for(let bit=0;bit<8;bit++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);}return(crc^0xffffffff)>>>0;}
 let offset=0;const entries=[],records=[],hashes={};

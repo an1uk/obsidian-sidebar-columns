@@ -1,13 +1,13 @@
 /* Only plugin-folded native sidebar branches receive these styles. */
 .workspace-split.mod-vertical > .sidebar-columns-collapsed {
-  flex: 0 0 32px !important;
-  width: 32px !important;
-  min-width: 32px !important;
-  max-width: 32px !important;
+  flex: 0 0 32px;
+  width: 32px;
+  min-width: 32px;
+  max-width: 32px;
   overflow: hidden;
 }
 .sidebar-columns-collapsed > :not(.sidebar-columns-rail) {
-  display: none !important;
+  display: none;
 }
 .sidebar-columns-rail {
   display: flex;

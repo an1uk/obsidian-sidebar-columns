@@ -1,4 +1,4 @@
-import { apiVersion, App, Modal, Notice, Plugin, PluginSettingTab, Setting, SuggestModal } from "obsidian";
+import { apiVersion, App, Modal, Notice, Plugin, PluginSettingTab, Setting, SuggestModal, type SettingDefinitionItem } from "obsidian";
 import { SidebarAdapter, type SidebarTarget } from "./adapter";
 import { BackupStore, type Snapshot } from "./backups";
 import { OperationService, type OperationResult } from "./operations";
@@ -17,6 +17,7 @@ export default class SidebarColumns extends Plugin {
   private alive = false;
   private lifecycle = 0;
   private disposeAdapter?: () => void;
+  private settingsTab?: SidebarSettings;
 
   async onload(): Promise<void> {
     const generation = ++this.lifecycle;
@@ -33,7 +34,7 @@ export default class SidebarColumns extends Plugin {
     }
     this.alive = true;
     this.adapter = new SidebarAdapter(this.app, message => new Notice(message));
-    this.backups = new BackupStore(this.app.vault.adapter, this.app.vault.configDir, apiVersion);
+    this.backups = new BackupStore(this.app.vault.adapter, this.app.vault.configDir, apiVersion, { pluginVersion: this.manifest.version });
     this.operations = new OperationService<SidebarTarget>({
       checkCompatibility: () => this.checkCompatibility(),
       isTargetCurrent: target => this.adapter.isCurrent(target),
@@ -48,6 +49,7 @@ export default class SidebarColumns extends Plugin {
         this.settings.acknowledged = true;
         try { await this.saveData(this.settings); }
         catch (error) { this.settings.acknowledged = previous; throw error; }
+        this.settingsTab?.update();
       },
       captureLayout: () => validateLayout(this.app.workspace.getLayout()),
       captureRevision: () => JSON.stringify(this.app.workspace.getLayout()),
@@ -76,9 +78,10 @@ export default class SidebarColumns extends Plugin {
       if (!checking) void this.command("collapse");
       return this.alive;
     }});
-    this.addCommand({id:"expand-all-columns", name:"Expand all sidebar columns", callback:() => this.adapter.expandAll()});
+    this.addCommand({id:"expand-all-columns", name:"Expand all columns", callback:() => this.adapter.expandAll()});
     this.addCommand({id:"restore-workspace", name:"Restore full workspace from a layout backup", callback:() => { void this.openRestorePicker(); }});
-    this.addSettingTab(new SidebarSettings(this.app, this));
+    this.settingsTab = new SidebarSettings(this.app, this);
+    this.addSettingTab(this.settingsTab);
     this.app.workspace.onLayoutReady(() => {
       if (!this.alive) return;
       try {
@@ -97,6 +100,7 @@ export default class SidebarColumns extends Plugin {
   onunload(): void {
     this.lifecycle++;
     this.alive = false;
+    this.settingsTab = undefined;
     this.operations?.dispose();
     for (const modal of [...this.modals]) modal.close();
     this.modals.clear();
@@ -108,7 +112,7 @@ export default class SidebarColumns extends Plugin {
     try {
       const target = this.adapter.resolveCommandTarget();
       if (kind === "split" && this.adapter.nativeSplitAvailable(target)) {
-        new Notice("Obsidian provides native sidebar splitting here. Use its built-in Split right action.");
+        new Notice("Obsidian provides native sidebar splitting here. Use its built-in split action.");
         return;
       }
       await this.report(kind === "addColumn" ? this.operations.addColumn(target) : kind === "split" ? this.operations.split(target) : this.operations.collapse(target));
@@ -137,6 +141,7 @@ export default class SidebarColumns extends Plugin {
     this.settings.versionOverrides.push(apiVersion);
     try { await this.saveData(this.settings); }
     catch (error) { this.settings.versionOverrides = previous; throw error; }
+    this.settingsTab?.update();
     return true;
   }
 
@@ -145,7 +150,7 @@ export default class SidebarColumns extends Plugin {
     try {
       const snapshots = await this.backups.list();
       if (!this.alive) return;
-      if (!snapshots.length) { new Notice("No valid Sidebar Columns layout backups are available."); return; }
+      if (!snapshots.length) { new Notice("No valid layout backups are available."); return; }
       const picker = new BackupPicker(this.app, snapshots, snapshot => { void this.report(this.operations.restore(snapshot)); }, modal => this.modals.delete(modal));
       this.modals.add(picker);
       picker.open();
@@ -176,6 +181,7 @@ export default class SidebarColumns extends Plugin {
     this.settings.versionOverrides = [];
     try { await this.saveData(this.settings); }
     catch (error) { this.settings.versionOverrides = previous; throw error; }
+    this.settingsTab?.update();
   }
 }
 
@@ -215,19 +221,61 @@ class BackupPicker extends SuggestModal<Snapshot> {
 
 class SidebarSettings extends PluginSettingTab {
   constructor(app: App, private owner: SidebarColumns) { super(app, owner); }
-  display(): void {
-    const {containerEl} = this;
-    containerEl.empty();
-    containerEl.createEl("h2", {text:"Sidebar Columns"});
-    containerEl.createEl("p", {text:EXPLANATION});
-    containerEl.createEl("p", {text:"Initial compatibility baseline: " + TESTED_VERSION + ". Current version: " + apiVersion + ". Experimental acknowledgement: " + (this.owner.settings.acknowledged ? "saved" : "required before the first change") + "."});
-    new Setting(containerEl).setName("Session-only column collapse").setDesc("Each native column can fold into a 32px expand rail. Tabs stay loaded. Restarting, native drag/resizing, workspace replacement or disabling the plugin expands folded columns.")
-      .addButton(button => button.setButtonText("Expand all columns").onClick(() => this.owner.adapter.expandAll()));
-    new Setting(containerEl).setName("Layout backups").setDesc("Protected baseline and five recent snapshots in " + this.app.vault.configDir + "/sidebar-columns-backups/. Raw .workspace.json files are suitable for documented manual recovery; .metadata.json files are not.")
-      .addButton(button => button.setButtonText("Restore full workspace…").onClick(() => { void this.owner.openRestorePicker(); }));
-    new Setting(containerEl).setName("Untested-version overrides").setDesc(this.owner.settings.versionOverrides.length ? this.owner.settings.versionOverrides.join(", ") : "None. Untested versions require an explicit per-version choice.")
-      .addButton(button => button.setButtonText("Clear overrides").onClick(() => { void this.owner.clearOverrides().then(() => this.display()).catch(error => new Notice(errorMessage(error))); }));
-    containerEl.createEl("p", {text:"Removing the plugin and reversing its native columns are separate actions. Existing columns can remain after removal. Backups contain layout information, not copies of notes."});
-    containerEl.createEl("a", {text:"Historical explanation and deliberately disabled feature", href:"https://forum.obsidian.md/t/unable-to-perform-split-right-in-a-left-leaf/84130/4"});
+
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    return [{
+      type: "group",
+      heading: "Sidebar columns",
+      items: [
+        {
+          name: "Experimental sidebar columns",
+          desc: EXPLANATION,
+          aliases: ["warning", "unsupported layouts", "visual risks"]
+        },
+        {
+          name: "Compatibility and consent",
+          desc: "Initial compatibility baseline: " + TESTED_VERSION + ". Current version: " + apiVersion + ". Experimental acknowledgement: " + (this.owner.settings.acknowledged ? "saved" : "required before the first change") + ".",
+          aliases: ["Obsidian version", "experimental acknowledgement"]
+        },
+        {
+          name: "Session-only column collapse",
+          desc: "Each native column can fold into a 32px expand rail. Tabs stay loaded. Restarting, native drag/resizing, workspace replacement or disabling the plugin expands folded columns.",
+          aliases: ["expand all columns", "fold", "rail"],
+          render: setting => {
+            setting.addButton(button => button.setButtonText("Expand all columns").onClick(() => this.owner.adapter.expandAll()));
+          }
+        },
+        {
+          name: "Layout backups",
+          desc: "Protected baseline and five recent snapshots in " + this.app.vault.configDir + "/sidebar-columns-backups/. Raw .workspace.json files are suitable for documented manual recovery; .metadata.json files are not. Restoring replaces the full workspace and requires confirmation.",
+          aliases: ["restore full workspace", "recovery", "snapshots"],
+          render: setting => {
+            setting.addButton(button => button.setButtonText("Restore full workspace...").onClick(() => { void this.owner.openRestorePicker(); }));
+          }
+        },
+        {
+          name: "Untested-version overrides",
+          desc: this.owner.settings.versionOverrides.length ? this.owner.settings.versionOverrides.join(", ") : "None. Untested versions require an explicit per-version choice.",
+          aliases: ["compatibility", "clear overrides"],
+          render: setting => {
+            setting.addButton(button => button.setButtonText("Clear overrides").onClick(() => {
+              void this.owner.clearOverrides().catch(error => new Notice(errorMessage(error)));
+            }));
+          }
+        },
+        {
+          name: "Plugin removal and recovery",
+          desc: "Removing the plugin and reversing its native columns are separate actions. Existing columns can remain after removal. Backups contain layout information, not copies of notes."
+        },
+        {
+          name: "Why sidebar splitting is experimental",
+          desc: "Historical explanation of the deliberately disabled feature.",
+          aliases: ["unsupported layouts", "Obsidian developer reasoning"],
+          render: setting => {
+            setting.descEl.createEl("a", {text: "Read the developer's explanation", href: "https://forum.obsidian.md/t/unable-to-perform-split-right-in-a-left-leaf/84130/4"});
+          }
+        }
+      ]
+    }];
   }
 }

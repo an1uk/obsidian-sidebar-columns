@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window as HappyWindow } from 'happy-dom';
+import { readFileSync } from 'node:fs';
 import { App, Menu, WorkspaceLeaf, WorkspaceSidedock, WorkspaceSplit, WorkspaceTabs } from 'obsidian';
 import { SidebarAdapter } from '../src/adapter';
 import { wrapMethod } from '../src/patch';
@@ -53,6 +54,12 @@ function fixture(rtl = false): Fixture {
   const win = new HappyWindow() as unknown as Window & typeof globalThis;
   win.requestAnimationFrame = callback => win.setTimeout(() => callback(0), 0);
   const doc = win.document;
+  Object.defineProperty(doc, 'win', { value: win });
+  Object.defineProperty(win.Node.prototype, 'instanceOf', { configurable: true, value(this: Node, type: typeof Node) { return this instanceof type; } });
+  Object.assign(win, {
+    createDiv: () => doc.createElement('div'),
+    createEl: (tag: keyof HTMLElementTagNameMap) => doc.createElement(tag),
+  });
   const container = doc.createElement('div');
   doc.body.appendChild(container);
   let sequence = 0;
@@ -951,4 +958,87 @@ test('ordinary clicks preserve collapsed columns and disposal removes document d
   f.doc.body.dispatchEvent(new f.win.DragEvent('drop', { bubbles: true }));
   assert.equal(f.adapter.getCollapsedCount(), 1); assert.equal(f.adapter.isBusyGesture(), false);
   f.adapter.expandAll();
+});
+
+function inlineProperties(element: HTMLElement, properties: readonly string[]): [string, string, string][] {
+  return properties.map(property => [property, element.style.getPropertyValue(property), element.style.getPropertyPriority(property)]);
+}
+
+test('fold presentation overrides native inline flex/width/display without important CSS and restores exact prior values and priorities', async () => {
+  const f = fixture(); const lower = f.group(f.node('leaf')); f.left.insertChild(-1, lower); f.layout();
+  const content = await wholeColumn(f), branch = content.children[0]!;
+  content.containerEl.classList.add('workspace-split', 'mod-vertical');
+  const sheet = f.doc.createElement('style');
+  sheet.textContent = '.workspace-split.mod-vertical > * { flex: 1 0 0; width: 0; }' + readFileSync('styles.css', 'utf8');
+  f.doc.head.appendChild(sheet);
+  branch.setDimension(65); content.children[1]!.setDimension(35);
+  branch.containerEl.style.flex = '1 0 auto';
+  branch.containerEl.style.setProperty('flex-grow', '65', 'important');
+  branch.containerEl.style.width = '220px'; branch.containerEl.style.minWidth = '80px'; branch.containerEl.style.maxWidth = '800px';
+  const panel = branch.children[0]!.containerEl;
+  panel.style.setProperty('display', 'flex', 'important'); panel.style.backgroundColor = 'red';
+  const properties = ['flex-grow', 'flex-shrink', 'flex-basis', 'width', 'min-width', 'max-width'];
+  const before = inlineProperties(branch.containerEl, properties);
+  const display = inlineProperties(panel, ['display']);
+  f.adapter.collapse(f.adapter.resolveTarget(asLeaf(f.leftLeaf)));
+  const style = f.win.getComputedStyle(branch.containerEl);
+  assert.equal(style.flexGrow, '0'); assert.equal(style.flexShrink, '0'); assert.equal(style.flexBasis, '32px');
+  assert.equal(style.width, '32px'); assert.equal(style.minWidth, '32px'); assert.equal(style.maxWidth, '32px');
+  assert.equal(f.win.getComputedStyle(panel).display, 'none');
+  assert.equal(branch.dimension, 65); assert.equal(content.children[1]!.dimension, 35);
+  assert.equal(branch.containerEl.querySelector('.sidebar-columns-rail')?.ownerDocument, f.doc);
+  assert.equal(sheet.textContent.includes('!important'), false);
+  f.adapter.expandAll();
+  assert.deepEqual(inlineProperties(branch.containerEl, properties), before);
+  assert.deepEqual(inlineProperties(panel, ['display']), display);
+  assert.equal(panel.style.backgroundColor, 'red'); assert.equal(branch.dimension, 65);
+  assert.equal(f.leftLeaf.view.closed, 0);
+});
+
+test('native dimension updates retain a 32px fold then restore newer native values on unload without overwriting a later plugin wrapper or styles', async () => {
+  const f = fixture(), content = await wholeColumn(f), branch = content.children[0]!;
+  branch.setDimension(65); content.children[1]!.setDimension(35); f.layout();
+  branch.containerEl.style.flex = '65 0 auto'; branch.containerEl.style.width = '220px';
+  branch.containerEl.style.minWidth = '100px'; branch.containerEl.style.maxWidth = '900px';
+  const panel = branch.children[0]!.containerEl;
+  panel.style.display = 'flex';
+  const release = f.adapter.install({ addColumn: () => undefined, split: () => undefined, collapse: () => undefined });
+  f.adapter.collapse(f.adapter.resolveTarget(asLeaf(f.leftLeaf)));
+  branch.setDimension(70);
+  assert.equal(branch.dimension, 70); assert.equal(branch.containerEl.style.flexGrow, '0');
+  assert.equal(branch.containerEl.style.flexBasis, '32px'); assert.equal(branch.containerEl.style.width, '32px');
+  const ours = branch.setDimension; let laterCalls = 0;
+  branch.setDimension = value => { laterCalls++; ours(value); };
+  const later = branch.setDimension;
+  branch.containerEl.style.width = '240px'; panel.style.display = 'grid';
+  release();
+  assert.equal(branch.setDimension, later);
+  assert.equal(branch.dimension, 70); assert.equal(branch.containerEl.style.flexGrow, '70');
+  assert.equal(branch.containerEl.style.flexBasis, 'auto'); assert.equal(branch.containerEl.style.minWidth, '100px');
+  assert.equal(branch.containerEl.style.maxWidth, '900px'); assert.equal(branch.containerEl.style.width, '240px');
+  assert.equal(panel.style.display, 'grid'); assert.equal(branch.containerEl.querySelector('.sidebar-columns-rail'), null);
+  branch.setDimension(75);
+  assert.equal(laterCalls, 1); assert.equal(branch.dimension, 75); assert.equal(branch.containerEl.style.flexGrow, '75');
+  assert.equal(branch.containerEl.style.width, '240px'); assert.equal(f.leftLeaf.view.closed, 0);
+});
+
+test('collapse fails closed when owning-window DOM helpers are missing or return foreign controls while native splitting stays available', async () => {
+  for (const problem of ['missing', 'foreign'] as const) {
+    const f = fixture(), content = await wholeColumn(f), branch = content.children[0]!;
+    const dimensions = content.children.map(child => child.dimension);
+    const view = f.leftLeaf.view;
+    if (problem === 'missing') Object.assign(f.win, { createDiv: undefined });
+    else {
+      const foreign = new HappyWindow();
+      Object.assign(f.win, { createEl: () => foreign.document.createElement('button') });
+    }
+    const target = f.adapter.resolveTarget(asLeaf(f.leftLeaf));
+    if (problem === 'missing') assert.equal(f.adapter.canCollapse(target), false);
+    assert.throws(() => f.adapter.collapse(target), /collapse is unavailable; splitting remains available/);
+    assert.equal(f.adapter.getCollapsedCount(), 0); assert.equal(branch.containerEl.querySelector('.sidebar-columns-rail'), null);
+    assert.deepEqual(content.children.map(child => child.dimension), dimensions);
+    assert.equal(f.leftLeaf.view, view); assert.equal(view.closed, 0);
+    await f.adapter.addColumn(f.adapter.resolveTarget(asLeaf(f.leftLeaf)));
+    assert.equal(content.children.length, 3);
+  }
 });

@@ -49,9 +49,11 @@ function directory(configDir: string): string {
 	return `${normalized}/sidebar-columns-backups`;
 }
 
-async function checksum(text: string): Promise<string> {
-	if (!globalThis.crypto?.subtle) throw new BackupError('Secure SHA-256 hashing is unavailable; no layout changes were made.');
-	const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+export type BackupCrypto = Pick<Crypto, 'subtle' | 'getRandomValues'>;
+
+async function checksum(text: string, crypto: BackupCrypto | undefined): Promise<string> {
+	if (!crypto?.subtle) throw new BackupError('Secure SHA-256 hashing is unavailable; no layout changes were made.');
+	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
 	return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
@@ -73,13 +75,15 @@ function metadata(text: string, expectedId: string): Metadata {
 	return entry as unknown as Metadata;
 }
 
-export interface BackupOptions { now?: () => Date; maxRecent?: number; }
+export interface BackupOptions { now?: () => Date; maxRecent?: number; pluginVersion?: string; crypto?: BackupCrypto; }
 
 /** Immutable raw layout files and separate metadata; never writes Obsidian's workspace file. */
 export class BackupStore {
 	readonly root: string;
 	private readonly now: () => Date;
 	private readonly maxRecent: number;
+	private readonly pluginVersion: string;
+	private readonly crypto: BackupCrypto | undefined;
 	private creating = false;
 	constructor(private readonly adapter: FileAdapter, configDir: string, private readonly appVersion: string, options: BackupOptions = {}) {
 		this.root = directory(configDir);
@@ -87,6 +91,9 @@ export class BackupStore {
 		this.maxRecent = options.maxRecent ?? 5;
 		if (!Number.isInteger(this.maxRecent) || this.maxRecent < 1 || this.maxRecent > 50) throw new BackupError('The backup retention count is invalid.');
 		if (!appVersion) throw new BackupError('The Obsidian version is missing.');
+		this.pluginVersion = options.pluginVersion ?? 'unknown';
+		if (!this.pluginVersion.trim()) throw new BackupError('The plugin version is missing.');
+		this.crypto = options.crypto ?? (typeof window === 'undefined' ? undefined : window.crypto);
 	}
 
 	private snapshot(entry: Metadata): Snapshot {
@@ -123,7 +130,7 @@ export class BackupStore {
 			throw new BackupError('The selected backup metadata changed. Select the backup again.');
 		}
 		const raw = await this.adapter.read(actual.rawPath);
-		if (await checksum(raw) !== entry.sha256) throw new BackupError('The layout backup failed its integrity check. It was not restored.');
+		if (await checksum(raw, this.crypto) !== entry.sha256) throw new BackupError('The layout backup failed its integrity check. It was not restored.');
 		return parseLayout(raw);
 	}
 
@@ -142,21 +149,21 @@ export class BackupStore {
 			const baseline = existing.length === 0;
 			const timestamp = this.now().toISOString();
 			const random = new Uint8Array(8);
-			if (!globalThis.crypto?.getRandomValues) throw new BackupError('Secure backup ID generation is unavailable.');
-			globalThis.crypto.getRandomValues(random);
+			if (!this.crypto?.getRandomValues) throw new BackupError('Secure backup ID generation is unavailable.');
+			this.crypto.getRandomValues(random);
 			const entropy = Array.from(random, byte => byte.toString(16).padStart(2, '0')).join('');
 			const id = `${baseline ? 'baseline' : 'snapshot'}-${timestamp.replace(/[:.]/g, '-')}-${entropy}`;
 			const rawPath = `${this.root}/${id}${rawSuffix}`;
 			const metadataPath = `${this.root}/${id}${metadataSuffix}`;
 			if (await this.adapter.exists(rawPath) || await this.adapter.exists(metadataPath)) throw new BackupError('The backup filename already exists; no backup was overwritten.');
-			const entry: Metadata = { formatVersion: 1, pluginVersion: '0.1.0', id, rawFile: `${id}${rawSuffix}`,
-				timestamp, baseline, reason, appVersion: this.appVersion, sha256: await checksum(raw) };
+			const entry: Metadata = { formatVersion: 1, pluginVersion: this.pluginVersion, id, rawFile: `${id}${rawSuffix}`,
+				timestamp, baseline, reason, appVersion: this.appVersion, sha256: await checksum(raw, this.crypto) };
 			rawTemp = `${rawPath}.tmp`;
 			metadataTemp = `${metadataPath}.tmp`;
 			await this.adapter.write(rawTemp, raw);
 			const readback = await this.adapter.read(rawTemp);
 			parseLayout(readback);
-			if (await checksum(readback) !== entry.sha256) throw new BackupError('The layout backup could not be verified; no layout changes were made.');
+			if (await checksum(readback, this.crypto) !== entry.sha256) throw new BackupError('The layout backup could not be verified; no layout changes were made.');
 			await this.adapter.write(metadataTemp, JSON.stringify(entry, null, 2));
 			metadata(await this.adapter.read(metadataTemp), id);
 			await this.adapter.rename(rawTemp, rawPath);

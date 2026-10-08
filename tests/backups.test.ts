@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BackupStore, type FileAdapter } from '../src/backups';
+import { webcrypto } from 'node:crypto';
+import { BackupStore, type BackupCrypto, type FileAdapter } from '../src/backups';
+const testCrypto = webcrypto as unknown as BackupCrypto;
 import type { RawLayout } from '../src/layout';
 
 function layout(): RawLayout {
@@ -36,7 +38,7 @@ class MemoryAdapter implements FileAdapter {
 
 function setup(configDir = '.custom-obsidian'): { adapter: MemoryAdapter; store: BackupStore } {
 	const adapter = new MemoryAdapter(); let tick = 0;
-	return { adapter, store: new BackupStore(adapter, configDir, '1.14.4', { now: () => new Date(Date.UTC(2026, 9, 8, 12, 0, tick++)) }) };
+	return { adapter, store: new BackupStore(adapter, configDir, '1.14.4', { now: () => new Date(Date.UTC(2026, 9, 8, 12, 0, tick++)), crypto: testCrypto, pluginVersion: '0.1.1' }) };
 }
 
 test('writes recoverable raw workspace JSON separately from integrity metadata in actual config directory', async () => {
@@ -47,7 +49,7 @@ test('writes recoverable raw workspace JSON separately from integrity metadata i
 	assert.deepEqual(JSON.parse(adapter.files.get(snapshot.rawPath) ?? ''), raw);
 	assert.equal(JSON.parse(adapter.files.get(snapshot.rawPath) ?? '').formatVersion, undefined);
 	const metadata = JSON.parse(adapter.files.get(snapshot.metadataPath) ?? '') as Record<string, unknown>;
-	assert.equal(metadata.formatVersion, 1); assert.equal(metadata.pluginVersion, '0.1.0');
+	assert.equal(metadata.formatVersion, 1); assert.equal(metadata.pluginVersion, '0.1.1');
 	assert.match(String(metadata.sha256), /^[a-f0-9]{64}$/);
 	assert.deepEqual(await store.load(snapshot), raw);
 	assert.deepEqual(raw, layout());
@@ -123,7 +125,7 @@ test('selected metadata replacement is detected before restore', async () => {
 
 test('retains the mandatory newly created snapshot when timestamps tie or clocks move backwards', async () => {
 	const adapter = new MemoryAdapter(); let time = Date.UTC(2026, 9, 8);
-	const store = new BackupStore(adapter, '.custom', '1.14.4', { now: () => new Date(time), maxRecent: 2 });
+	const store = new BackupStore(adapter, '.custom', '1.14.4', { now: () => new Date(time), maxRecent: 2, crypto: testCrypto, pluginVersion: '0.1.1' });
 	await store.create(layout(), 'before-split');
 	for (let i = 0; i < 5; i++) {
 		if (i > 2) time--;
@@ -133,4 +135,40 @@ test('retains the mandatory newly created snapshot when timestamps tie or clocks
 		assert.ok((await store.list()).some(item => item.id === created.id));
 	}
 	assert.equal((await store.list()).length, 3);
+});
+
+test('backup metadata records the supplied manifest version and still loads snapshots from 0.1.0', async () => {
+  const adapter = new MemoryAdapter();
+  const store = new BackupStore(adapter, '.custom', '1.14.4', { crypto: testCrypto, pluginVersion: '9.8.7-test' });
+  const snapshot = await store.create(layout(), 'before-split');
+  const data = JSON.parse(adapter.files.get(snapshot.metadataPath) ?? '') as Record<string, unknown>;
+  assert.equal(data.pluginVersion, '9.8.7-test');
+  data.pluginVersion = '0.1.0'; adapter.files.set(snapshot.metadataPath, JSON.stringify(data));
+  assert.deepEqual(await store.load(snapshot), layout());
+  assert.equal((await store.list())[0]?.id, snapshot.id);
+});
+
+test('backup hashing and entropy use the injected owning-window crypto port without ambient globals', async () => {
+  const adapter = new MemoryAdapter(); let randomCalls = 0, digestCalls = 0;
+  const crypto: BackupCrypto = {
+    getRandomValues<T extends ArrayBufferView>(array: T): T { randomCalls++; return testCrypto.getRandomValues(array); },
+    subtle: {
+      digest(algorithm: AlgorithmIdentifier, data: BufferSource): Promise<ArrayBuffer> {
+        digestCalls++; return testCrypto.subtle.digest(algorithm, data);
+      },
+    } as SubtleCrypto,
+  };
+  const store = new BackupStore(adapter, '.custom', '1.14.4', { crypto, pluginVersion: '0.1.1' });
+  const snapshot = await store.create(layout(), 'before-split');
+  assert.deepEqual(await store.load(snapshot), layout());
+  assert.equal(randomCalls, 1); assert.ok(digestCalls >= 4);
+});
+
+test('unavailable secure crypto fails closed and blank plugin version is rejected', async () => {
+  const adapter = new MemoryAdapter();
+  const crypto = {} as BackupCrypto;
+  const store = new BackupStore(adapter, '.custom', '1.14.4', { crypto, pluginVersion: '0.1.1' });
+  await assert.rejects(store.create(layout(), 'before-split'), /Secure backup ID generation is unavailable/);
+  assert.equal(adapter.files.size, 0);
+  assert.throws(() => new BackupStore(adapter, '.custom', '1.14.4', { crypto: testCrypto, pluginVersion: '  ' }), /plugin version is missing/);
 });
