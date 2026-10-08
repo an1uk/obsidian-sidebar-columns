@@ -108,4 +108,6 @@ See [full-height results](docs/FULL-COLUMN-TEST-RESULTS.md), [architecture](docs
 
 The name and ID were absent from the official directory when checked on 8 October 2026; this is not a reservation. Review the current [developer policies](https://docs.obsidian.md/community-directory/developer-policies), [submission requirements](https://docs.obsidian.md/community-directory/submission-requirements-for-plugins) and [submission workflow](https://docs.obsidian.md/Plugins/Releasing/Submit%20your%20plugin) before any future community-directory submission.
 
-No telemetry, runtime network requests, external accounts, self-updating code or workspace uploads. Author: Alan ([an1uk](https://github.com/an1uk)). Source license: 0-BSD.
+No telemetry, runtime network requests, external accounts, self-updating code or workspace uploads. Author: Alan ([an1uk](https://github.com/an1uk)). Source license: [0-BSD](LICENSE).
+
+The project setup follows the official Obsidian sample plugin, which is also licensed under Zero-Clause BSD (Copyright (c) 2020 Dynalist Inc.).
