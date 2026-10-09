@@ -2,18 +2,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Setting, type App, type Command, type PluginManifest, type PluginSettingTab, type SettingDefinition, type SettingDefinitionItem, type SettingGroup } from "obsidian";
 import SidebarColumns from "../src/main";
-import type { SidebarTarget } from "../src/adapter";
+import type { SidebarAdapter, SidebarTarget } from "../src/adapter";
 import { getSettingButtons, getSettingUpdateCount, getTestNotices, setTestApiVersion } from "./obsidian-stub";
 
-async function setup(data: unknown = null): Promise<{ plugin: SidebarColumns; tab: PluginSettingTab; commands: Command[] }> {
+async function setup(data: unknown = null): Promise<{ plugin: SidebarColumns; tab: PluginSettingTab; commands: Command[]; startLayout: () => void }> {
   const rawLayout = {
     main: { id: "main", type: "split", direction: "vertical", children: [] },
     left: { id: "left", type: "split", direction: "horizontal", children: [] },
     right: { id: "right", type: "split", direction: "horizontal", children: [] }
   };
+  const ready: (() => void)[] = [];
   const app = {
     vault: { adapter: {}, configDir: "custom-config" },
-    workspace: { onLayoutReady: () => {}, on: () => ({}), getLayout: () => rawLayout }
+    workspace: { onLayoutReady: (callback: () => void) => { ready.push(callback); }, on: () => ({}), getLayout: () => rawLayout }
   } as unknown as App;
   const manifest: PluginManifest = { id: "sidebar-columns", name: "Sidebar Columns", version: "0.1.1", minAppVersion: "1.14.4", description: "test", author: "Alan", isDesktopOnly: true };
   const plugin = new SidebarColumns(app, manifest);
@@ -26,7 +27,7 @@ async function setup(data: unknown = null): Promise<{ plugin: SidebarColumns; ta
   assert.ok(tab);
   plugin.adapter.assertCompatible = () => {};
   plugin.adapter.isCurrent = () => true;
-  return { plugin, tab, commands };
+  return { plugin, tab, commands, startLayout: () => { for (const callback of ready) callback(); } };
 }
 
 function rows(items: SettingDefinitionItem[]): SettingDefinition[] {
@@ -174,4 +175,54 @@ test("pending override persistence cannot refresh a removed settings tab after u
   finish();
   await pending;
   assert.equal(getSettingUpdateCount(tab), before);
+});
+
+test("the full-width row palette command uses guarded targeting and required row backups", async () => {
+  const { plugin, commands } = await setup({ acknowledged: true, versionOverrides: [] });
+  const calls: string[] = [];
+  const target = {} as SidebarTarget;
+  plugin.adapter.resolveCommandTarget = () => { calls.push("target"); return target; };
+  plugin.adapter.addFullWidthRowBelow = async chosen => { assert.equal(chosen, target); calls.push("native-row"); };
+  plugin.backups.create = async (_layout, reason) => {
+    calls.push("backup:" + reason);
+    return { id: "baseline-row", rawPath: "raw.workspace.json", metadataPath: "raw.metadata.json", timestamp: "2026-10-09T12:00:00.000Z", baseline: true, reason, appVersion: "1.14.4" };
+  };
+  const command = commands.find(item => item.id === "add-row-below");
+  assert.ok(command?.checkCallback);
+  assert.equal(command.name, "Add full-width bottom sidebar row (experimental)");
+  assert.equal(command.checkCallback(true), true);
+  assert.deepEqual(calls, []);
+  command.checkCallback(false);
+  await settle();
+  assert.deepEqual(calls, ["target", "backup:before-add-row", "native-row"]);
+  plugin.adapter.resolveCommandTarget = () => { throw new Error("Select a tab in the main window sidebar."); };
+  command.checkCallback(false);
+  await settle();
+  assert.deepEqual(calls, ["target", "backup:before-add-row", "native-row"]);
+  assert.equal(getTestNotices().at(-1), "Select a tab in the main window sidebar.");
+  plugin.onunload();
+});
+
+test("menu row creation and header collapse route through shared consent and backup callbacks", async () => {
+  const { plugin, startLayout } = await setup();
+  const calls: string[] = [];
+  const target = {} as SidebarTarget;
+  let installed: Parameters<SidebarAdapter["install"]>[0] | undefined;
+  plugin.adapter.install = actions => { installed = actions; return () => {}; };
+  plugin.confirm = async () => { calls.push("consent"); return true; };
+  plugin.saveData = async () => { calls.push("persist"); };
+  plugin.adapter.addFullWidthRowBelow = async chosen => { assert.equal(chosen, target); calls.push("native-row"); };
+  plugin.adapter.collapse = async chosen => { assert.equal(chosen, target); calls.push("native-collapse"); };
+  plugin.backups.create = async (_layout, reason) => {
+    calls.push("backup:" + reason);
+    return { id: "baseline-actions", rawPath: "raw.workspace.json", metadataPath: "raw.metadata.json", timestamp: "2026-10-09T12:00:00.000Z", baseline: true, reason, appVersion: "1.14.4" };
+  };
+  startLayout();
+  assert.ok(installed);
+  installed.addRow(target);
+  await settle();
+  installed.collapse(target);
+  await settle();
+  assert.deepEqual(calls, ["consent", "persist", "backup:before-add-row", "native-row", "backup:before-collapse", "native-collapse"]);
+  plugin.onunload();
 });

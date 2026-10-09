@@ -14,6 +14,7 @@ export interface OperationPort<T> {
 	loadBackup(snapshot: Snapshot): Promise<RawLayout>;
 	confirmFullRestore(snapshot: Snapshot): Promise<boolean>;
 	addColumn(target: T): void | Promise<void>;
+	addRow(target: T): void | Promise<void>;
 	split(target: T): void | Promise<void>;
 	collapse(target: T): void | Promise<void>;
 	applyFullLayout(layout: RawLayout): Promise<void>;
@@ -39,6 +40,7 @@ export class OperationService<T> {
 	get busy(): boolean { return this.running; }
 	dispose(): void { this.disposed = true; this.generation++; }
 	addColumn(target: T): Promise<OperationResult> { return this.run('addColumn', target); }
+	addRow(target: T): Promise<OperationResult> { return this.run('addRow', target); }
 	split(target: T): Promise<OperationResult> { return this.run('split', target); }
 	collapse(target: T): Promise<OperationResult> { return this.run('collapse', target); }
 
@@ -60,7 +62,7 @@ export class OperationService<T> {
 		return work(generation).catch((error: unknown) => result('error', error instanceof Error ? error.message : 'The sidebar operation failed.')).finally(() => { this.running = false; });
 	}
 
-	private run(action: 'addColumn' | 'split' | 'collapse', target: T): Promise<OperationResult> {
+	private run(action: 'addColumn' | 'addRow' | 'split' | 'collapse', target: T): Promise<OperationResult> {
 		return this.exclusive(async generation => {
 			if (!await this.port.checkCompatibility()) return result('blocked', 'This Obsidian version or workspace structure is not enabled for experimental sidebar columns.');
 			if (!this.alive(generation)) return this.unavailable();
@@ -70,11 +72,20 @@ export class OperationService<T> {
 			if (!this.port.isTargetCurrent(target)) return this.stale();
 			const revision = this.port.captureRevision();
 			const layout = validateLayout(this.port.captureLayout());
-			const snapshot = await this.port.createBackup(layout, action === 'addColumn' ? 'before-add-column' : `before-${action}`);
+			const backupReason = {
+				addColumn: 'before-add-column', addRow: 'before-add-row', split: 'before-split', collapse: 'before-collapse'
+			}[action];
+			const snapshot = await this.port.createBackup(layout, backupReason);
 			if (!this.alive(generation)) return this.unavailable();
 			if (!this.port.isRevisionCurrent(revision) || !this.port.isTargetCurrent(target)) return this.stale();
 			await this.port[action](target);
-			return result('success', action === 'addColumn' ? 'An empty full-height sidebar column was added.' : action === 'split' ? 'An empty column was added beside this row.' : 'The sidebar column was collapsed.', snapshot);
+			const successMessage = {
+				addColumn: 'An empty full-height sidebar column was added.',
+				addRow: 'An empty full-width bottom sidebar row was added.',
+				split: 'An empty column was added beside this row.',
+				collapse: 'The sidebar column was collapsed.'
+			}[action];
+			return result('success', successMessage, snapshot);
 		});
 	}
 

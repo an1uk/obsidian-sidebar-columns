@@ -5,7 +5,7 @@ const context = await esbuild.context({
   platform: "browser", format: "cjs", target: "es2018",
   external: ["obsidian", "electron", ...["node:crypto", "crypto"]],
   sourcemap: watch ? "inline" : false, minify: false,
-  banner: {js: "/* Sidebar Columns 0.1.1 - experimental. Source distributed under 0BSD. */"},
+  banner: {js: "/* Sidebar Columns 0.1.2 - experimental. Source distributed under 0BSD. */"},
   logLevel: "info"
 });
 if (watch) await context.watch();

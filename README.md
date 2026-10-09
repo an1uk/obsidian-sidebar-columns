@@ -1,6 +1,6 @@
 # Sidebar Columns
 
-Experimental native columns for the actual left and right Obsidian sidebars. Desktop only. Version 0.1.1.
+Experimental native columns for the actual left and right Obsidian sidebars. Desktop only. Version 0.1.2.
 
 **This reintroduces a deliberately disabled, unsupported layout arrangement.** Sidebar column splitting became accessible when central-workspace tab-management code was reused for sidebar tabs. Obsidian intentionally removed the sidebar “Split right” action in [1.6.4 on 20 June 2024](https://obsidian.md/changelog/2024-06-20-desktop-v1.6.4/). [WhiteNoise’s explanation](https://forum.obsidian.md/t/unable-to-perform-split-right-in-a-left-leaf/84130/4) states that multiple sidebar columns were never officially supported or considered when designing themes and interactions.
 
@@ -16,18 +16,18 @@ An observed width limit in the isolated 1.14.4 test: a 900px window with both si
 
 The initial compatibility baseline is **Obsidian 1.14.4**. Other versions require an explicit override saved separately for each exact version. Runtime shape checks and backups remain mandatory after an override. The plugin avoids its custom split action when native sidebar splitting can reliably be detected for the actual focused target.
 
-Read [full-height column acceptance](docs/FULL-COLUMN-TEST-RESULTS.md) and [test results](docs/TEST-RESULTS.md) for the renderer, installer, OS, themes and limitations tested. A typecheck, mocked test or extracted native fixture is not live Obsidian acceptance. macOS and Linux are unverified unless that results document explicitly says otherwise. Pop-out sidebar support is outside v0.1; main-window target guards reject pop-out leaves.
+Read [current layout-controls acceptance](docs/LAYOUT-CONTROLS-TEST-RESULTS.md) for the renderer, installer, OS, themes and limitations tested. Earlier [full-height column acceptance](docs/FULL-COLUMN-TEST-RESULTS.md) and [test results](docs/TEST-RESULTS.md) describe previous builds. A typecheck, mocked test or extracted native fixture is not live Obsidian acceptance. macOS and Linux are unverified unless that results document explicitly says otherwise. Pop-out sidebar support is outside v0.1; main-window target guards reject pop-out leaves.
 
 ## Install
 
 1. Start in a disposable test vault and preserve your current workspace.
-2. Download `main.js`, `manifest.json` and `styles.css` from the [experimental 0.1.1 release](https://github.com/an1uk/obsidian-sidebar-columns/releases/tag/0.1.1).
+2. Download `main.js`, `manifest.json` and `styles.css` from the [experimental 0.1.2 release](https://github.com/an1uk/obsidian-sidebar-columns/releases/tag/0.1.2).
 3. Create `sidebar-columns` under `<vault configuration directory>/plugins/` and put those three files inside. The default configuration directory is `.obsidian`; use the actual directory if you changed it.
 4. Enable Sidebar Columns in Community plugins. Its first layout change asks for experimental consent and writes a protected layout baseline.
 
 For ZIP installation, build locally with `pnpm package` or download the installable ZIP from the [release workflow artifacts](https://github.com/an1uk/obsidian-sidebar-columns/actions/workflows/release.yml). Extract the ZIP’s `sidebar-columns` folder into the same plugins directory. GitHub Actions artifact downloads require a GitHub login.
 
-Installation does not itself create columns. Releases remain labelled experimental and use regular GitHub release status for directory discovery. That classification does not change the unsupported-layout warning or establish Obsidian community-directory approval.
+Installation does not itself create columns. Releases remain labelled experimental and use regular GitHub release status for directory discovery. The directory listing and release status retain the unsupported-layout warning; see the publication status below for manual-review status.
 
 ## Use
 
@@ -35,9 +35,13 @@ Right-click an actual sidebar tab and choose **Add full-height column (experimen
 
 The secondary action **Split this row right (experimental)** divides only the clicked tab group into side-by-side groups. Use it to arrange panels within one row of a column. Whole columns can contain stacked rows and nested row splits.
 
-Palette commands are **Add full-height sidebar column (experimental)** and **Split focused sidebar row right (experimental)**. Select a sidebar tab first. Central, hidden, ambiguous and pop-out targets produce an explanation without a layout change. A tab menu targets the clicked tab even if another tab or the central editor has focus.
+Choose **Add full-width bottom row (experimental)** on a sidebar tab to add an empty native row beneath all the current content in that sidebar. If you have two columns above it, the new row spans their combined width. Existing views stay in place; fill the new row by dragging tabs into it.
 
-To collapse a column, right-click one of its tabs and choose **Collapse this column (experimental)**, or use the equivalent focused-column command. All stacked rows and nested row splits in that whole column fold into a **32px expand rail**. In older layouts containing only row splits, collapse targets the local column branch. Views stay loaded, including transient plugin input. Use the rail’s keyboard-accessible button or **Expand all sidebar columns** to reopen it. At least one sibling column remains open.
+To build two upper panels and one wider lower panel, create two columns, then add a full-width bottom row. To add a third panel to the upper row, use **Split this row right** on an upper tab. **Add full-height column** creates a column beside the entire current arrangement; after a mixed layout, the existing wide row remains within that original arrangement.
+
+Palette commands include **Add full-height sidebar column (experimental)**, **Add full-width bottom sidebar row (experimental)** and **Split focused sidebar row right (experimental)**. Select a sidebar tab first. Central, hidden, ambiguous and pop-out targets produce an explanation without a layout change. A tab menu targets the clicked tab even if another tab or the central editor has focus.
+
+Collapse a column using the icon at the left edge of its first native tab bar. The placement follows the computed tab-bar flow in LTR and RTL, keeping it clear of Windows window controls. The last open column’s button is disabled so one column stays visible. The tab-menu **Collapse this column (experimental)** action and focused-column command remain available. All stacked rows and nested row splits in that whole column fold into a **32px expand rail**. In mixed layouts, each column belongs to its containing row region; a wide row with no side-by-side sibling does not receive a column-collapse button. Views stay loaded, including transient plugin input. Use the rail’s keyboard-accessible button, placed below the window-header band, or **Expand all columns** to reopen it. At least one sibling column remains open.
 
 Collapse is session-only. Native resizing, drag/drop, splitting, restoration, workspace replacement and disabling the plugin expand folded columns before native geometry is measured. Ordinary clicks on another tab leave folds in place. Restarting starts expanded; rail widths are never intentionally saved as native column dimensions.
 
@@ -96,23 +100,23 @@ pnpm package
 
 The Obsidian 1.14.4 API definitions are pinned to official source commit `9abd9605ce081383674aae1ed111c456edde0688`. That API version was not available on npm at implementation time (npm’s latest was 1.13.1), so the lockfile uses the official source archive without substituting older definitions. Only esbuild’s required dependency setup script is allowed.
 
-`pnpm package` writes `dist/sidebar-columns-0.1.1.zip` and checksums. The ZIP contains only the three distributable plugin files, inside `sidebar-columns/`; it contains no notes, credentials, test profiles or workspace backups.
+`pnpm package` writes `dist/sidebar-columns-0.1.2.zip` and checksums. The ZIP contains only the three distributable plugin files, inside `sidebar-columns/`; it contains no notes, credentials, test profiles or workspace backups.
 
 Runtime acceptance harnesses are Windows-only developer tools. Set `SIDEBAR_COLUMNS_SOURCE_VAULT` to an explicit, read-only asset-source vault; the harness copies only distributable Calendar/theme files and hashes configuration content. It never copies notes or saved plugin settings. Set `SIDEBAR_COLUMNS_SOURCE_CONFIG_DIR` if that source vault uses a custom configuration directory. Optional `SIDEBAR_COLUMNS_OBSIDIAN_EXE` and `SIDEBAR_COLUMNS_ASAR` override the normal per-user Windows installation paths. These environment inputs are not needed to build or install the plugin.
 
 `pnpm test:runtime` runs the isolated desktop acceptance harness when the installed executable and the 1.14.4 update archive are available. It uses a separate profile and fixture vault, validates isolation through native IPC before interactions, and records evidence. It does not use global Obsidian CLI or URI forwarding to control the working session. Its usable-center assertion returns nonzero for the documented 900px-window width limit; this is retained as an observed limitation, rather than reported as a pass. Use `pnpm test:runtime --rtl` for actual Arabic RTL acceptance.
 
-Use `pnpm test:review-fix --expected-build-hash <main.js SHA-256>` for current declarative-settings, inline-rail and full-height acceptance (add `--rtl` for Arabic RTL). Use `pnpm test:full-columns --expected-build-hash <main.js SHA-256>` for full-height default, secondary row splitting and whole-stack collapse acceptance. Use `pnpm test:recovery --expected-build-hash <main.js SHA-256>` for the separate guarded restore, restart and offline recovery harness. Use `pnpm test:workspaces --expected-build-hash <main.js SHA-256>` for core Workspaces, native central splitting and pop-out targeting acceptance.
+Use `pnpm test:layout-controls --expected-build-hash <main.js SHA-256>` for v0.1.2 full-width bottom rows and direct tab-bar collapse controls (add `--rtl` for Arabic RTL). `pnpm test:review-fix` retains the historical v0.1.1 declarative-settings and inline-rail acceptance driver; its version assertions intentionally identify that build. Use `pnpm test:full-columns --expected-build-hash <main.js SHA-256>` for full-height default, secondary row splitting and whole-stack collapse acceptance. Use `pnpm test:recovery --expected-build-hash <main.js SHA-256>` for the separate guarded restore, restart and offline recovery harness. Use `pnpm test:workspaces --expected-build-hash <main.js SHA-256>` for core Workspaces, native central splitting and pop-out targeting acceptance.
 
 See [full-height results](docs/FULL-COLUMN-TEST-RESULTS.md), [architecture](docs/ARCHITECTURE.md), [manual checklist](docs/MANUAL-TESTS.md), [interaction results](docs/TEST-RESULTS.md) and [recovery results](docs/RECOVERY-TEST-RESULTS.md) and [Workspaces/pop-out results](docs/WORKSPACES-TEST-RESULTS.md).
 
 ## Release provenance
 
-The tag-only release workflow builds from the exact version tag, runs the official Obsidian lint rules with zero warnings, checks types and tests, and verifies packaging. GitHub artifact attestations cover the exact main.js, manifest.json and styles.css files. Only those three files are attached to the Obsidian release. The manual-install ZIP, checksums and attestation bundle remain separate Actions artifacts. See [review-fix verification](docs/REVIEW-FIX-TEST-RESULTS.md) for current results; earlier 0.1.0 acceptance documents remain historical evidence.
+The tag-only release workflow builds from the exact version tag, runs the official Obsidian lint rules with zero warnings, checks types and tests, and verifies packaging. GitHub artifact attestations cover the exact main.js, manifest.json and styles.css files. Only those three files are attached to the Obsidian release. The manual-install ZIP, checksums and attestation bundle remain separate Actions artifacts. See [layout-controls verification](docs/LAYOUT-CONTROLS-TEST-RESULTS.md) for current results. Earlier [review-fix verification](docs/REVIEW-FIX-TEST-RESULTS.md) and 0.1.0 acceptance documents remain historical evidence.
 
 ## Publication status and privacy
 
-The name and ID were absent from the official directory when checked on 8 October 2026; this is not a reservation. Review the current [developer policies](https://docs.obsidian.md/community-directory/developer-policies), [submission requirements](https://docs.obsidian.md/community-directory/submission-requirements-for-plugins) and [submission workflow](https://docs.obsidian.md/Plugins/Releasing/Submit%20your%20plugin) before any future community-directory submission.
+The [official community directory](https://github.com/obsidianmd/obsidian-releases/blob/master/community-plugins.json) lists Sidebar Columns and this repository as of 9 October 2026. Its description states that the plugin has not been manually reviewed by Obsidian staff. The current developer policies and submission requirements were rechecked on that date. Review the current [developer policies](https://docs.obsidian.md/community-directory/developer-policies), [submission requirements](https://docs.obsidian.md/community-directory/submission-requirements-for-plugins) and [submission workflow](https://docs.obsidian.md/Plugins/Releasing/Submit%20your%20plugin) before any future community-directory submission.
 
 No telemetry, runtime network requests, external accounts, self-updating code or workspace uploads. Author: Alan ([an1uk](https://github.com/an1uk)). Source license: [0-BSD](LICENSE).
 

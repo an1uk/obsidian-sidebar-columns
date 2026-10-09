@@ -32,6 +32,7 @@ function setup(): { service: OperationService<string>; port: OperationPort<strin
 		loadBackup: async () => { calls.push('load'); return layout('saved'); },
 		confirmFullRestore: async () => { calls.push('confirm-full-restore'); return true; },
 		addColumn: () => { calls.push('add-column'); },
+		addRow: () => { calls.push('add-row'); },
 		split: () => { calls.push('split'); },
 		collapse: () => { calls.push('collapse'); },
 		applyFullLayout: async raw => { calls.push(`apply-full:${String(raw.value)}`); },
@@ -163,4 +164,56 @@ test('failed mandatory backup prevents full-height column creation', async () =>
  port.createBackup=async()=>{throw new Error('cannot write');};
  assert.equal((await service.addColumn('sidebar')).status,'error');
  assert.ok(!calls.includes('add-column'));
+});
+
+test('full-width row creation persists consent and a before-add-row snapshot before native mutation', async () => {
+ const {service,calls}=setup();
+ const result=await service.addRow('sidebar');
+ assert.equal(result.status,'success');
+ assert.equal(result.message,'An empty full-width bottom sidebar row was added.');
+ assert.equal(result.snapshot,snapshot);
+ assert.deepEqual(calls,['compatibility','consent','persist','capture','backup:before-add-row','add-row']);
+});
+
+test('full-width row creation cannot bypass cancelled consent or failed required backups', async () => {
+ const cancelled=setup();
+ cancelled.port.requestConsent=async()=>false;
+ assert.equal((await cancelled.service.addRow('sidebar')).status,'cancelled');
+ assert.ok(!cancelled.calls.includes('capture'));
+ assert.ok(!cancelled.calls.includes('add-row'));
+ const failed=setup();
+ failed.port.createBackup=async()=>{throw new Error('cannot write row backup');};
+ assert.equal((await failed.service.addRow('sidebar')).status,'error');
+ assert.ok(!failed.calls.includes('add-row'));
+});
+
+test('full-width rows revalidate their selected branch and workspace revision after the backup boundary', async () => {
+ for(const staleKind of ['target','revision'] as const) {
+  const {service,port,state,calls}=setup();
+  state.acknowledged=true;
+  port.createBackup=async()=>{
+   if(staleKind==='target') state.current=false;
+   else state.revision++;
+   return snapshot;
+  };
+  assert.equal((await service.addRow('sidebar')).status,'stale');
+  assert.ok(!calls.includes('add-row'));
+ }
+});
+
+test('the full-width row lock blocks competing actions and unloading prevents delayed mutation', async () => {
+ const {service,port,state,calls}=setup();
+ state.acknowledged=true;
+ const backup=deferred<Snapshot>();
+ const reached=deferred<void>();
+ port.createBackup=()=>{reached.resolve();return backup.promise;};
+ const pending=service.addRow('sidebar');
+ await reached.promise;
+ assert.equal((await service.addColumn('sidebar')).status,'blocked');
+ assert.equal((await service.collapse('sidebar')).status,'blocked');
+ service.dispose();
+ backup.resolve(snapshot);
+ assert.equal((await pending).status,'blocked');
+ assert.ok(!calls.includes('add-row'));
+ assert.equal((await service.addRow('sidebar')).status,'blocked');
 });

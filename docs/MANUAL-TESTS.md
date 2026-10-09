@@ -4,9 +4,9 @@ Use a fresh test vault and a separate Obsidian profile. Keep the personal vault 
 
 Run the harness after building with the documented Node runtime:
 
-    node scripts/runtime-full-columns.mjs --run --expected-build-hash <main.js SHA-256>
+    node scripts/runtime-layout-controls.mjs --run --expected-build-hash <main.js SHA-256>
 
-The full-column harness requires --run and an exact expected build hash before launching. Evidence is retained under .runtime-tests/<run-id>/; FULL-COLUMN-TEST-RESULTS.md identifies the full-height acceptance run. Run the harness from a host context that permits writing the external project, launching Obsidian and connecting to its loopback debugging endpoint.
+The layout-controls harness requires --run and an exact expected build hash before launching. Evidence is retained under .runtime-tests/<run-id>/; LAYOUT-CONTROLS-TEST-RESULTS.md identifies the v0.1.2 acceptance runs. Earlier full-column and review-fix drivers retain their historical results. Run the harness from a host context that permits writing the external project, launching Obsidian and connecting to its loopback debugging endpoint.
 
 ## Functional acceptance
 
@@ -18,6 +18,8 @@ The full-column harness requires --run and an exact expected build hash before l
 | Native split fallback | With the built-in sidebar Split right disabled, the plugin exposes its own action. When native support is available, the plugin does not duplicate it. |
 | Full-height default | From a sidebar containing stacked Files/Search or Outline/Backlinks, add a whole column. All original rows remain together and the new column spans their complete content height. Add a third column beside the selected complete column. |
 | Secondary row action | Split only one group within a full-height column. Other stacked rows retain their width and position; the top-level full-height columns stay intact. |
+| Two above one | Add a full-width bottom row below two upper columns; it spans both columns on left/right sidebars and in RTL. Repeated appends preserve relative prior row heights and nested column widths. |
+| Header controls | Each outer column has one collapse icon in its top native tab bar; the wide bottom row has none. Cancel/failed backups keep layout unchanged, the last open column stays expanded, and rail expansion returns keyboard focus. |
 | Left/right layout | Create two, three and four columns on each side. Keep multiple native tab groups stacked inside at least one column. |
 | Stateful third-party view | Put Calendar beside core panels; interact with it, move its tab and split around it. Existing view instances and state remain usable. |
 | Native tab dragging | Move tabs within a column, between columns, between sidebars and the center. No hidden leaf, duplicated panel or unreachable tab remains. |

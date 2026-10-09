@@ -42,7 +42,7 @@ export default class SidebarColumns extends Plugin {
       requestConsent: () => this.confirm("Enable experimental sidebar columns?", [
         EXPLANATION,
         "The first change requires a protected layout baseline and subsequent changes require recent snapshots. Snapshots remain local and may contain private file paths and plugin state.",
-        "New columns start empty. Existing panels are not cloned."
+        "New columns and rows start empty. Existing panels are not cloned."
       ], "Enable experimental sidebar columns"),
       persistAcknowledgement: async () => {
         const previous = this.settings.acknowledged;
@@ -62,12 +62,17 @@ export default class SidebarColumns extends Plugin {
         "Snapshot: " + snapshot.timestamp + " (" + snapshot.reason + "). Saved with Obsidian " + snapshot.appVersion + "."
       ], "Restore full workspace"),
       addColumn: target => this.adapter.addColumn(target),
+      addRow: target => this.adapter.addFullWidthRowBelow(target),
       split: target => this.adapter.splitRight(target),
       collapse: target => this.adapter.collapse(target),
       applyFullLayout: layout => this.applyFullLayout(layout)
     });
     this.addCommand({id:"add-column", name:"Add full-height sidebar column (experimental)", checkCallback:checking => {
       if (!checking) void this.command("addColumn");
+      return this.alive;
+    }});
+    this.addCommand({id:"add-row-below", name:"Add full-width bottom sidebar row (experimental)", checkCallback:checking => {
+      if (!checking) void this.command("addRow");
       return this.alive;
     }});
     this.addCommand({id:"split-right", name:"Split focused sidebar row right (experimental)", checkCallback:checking => {
@@ -87,6 +92,7 @@ export default class SidebarColumns extends Plugin {
       try {
         this.disposeAdapter = this.adapter.install({
           addColumn: target => { void this.report(this.operations.addColumn(target)); },
+          addRow: target => { void this.report(this.operations.addRow(target)); },
           split: target => { void this.report(this.operations.split(target)); },
           collapse: target => { void this.report(this.operations.collapse(target)); }
         });
@@ -108,14 +114,14 @@ export default class SidebarColumns extends Plugin {
     this.adapter?.expandAll();
   }
 
-  private async command(kind: "addColumn" | "split" | "collapse"): Promise<void> {
+  private async command(kind: "addColumn" | "addRow" | "split" | "collapse"): Promise<void> {
     try {
       const target = this.adapter.resolveCommandTarget();
       if (kind === "split" && this.adapter.nativeSplitAvailable(target)) {
         new Notice("Obsidian provides native sidebar splitting here. Use its built-in split action.");
         return;
       }
-      await this.report(kind === "addColumn" ? this.operations.addColumn(target) : kind === "split" ? this.operations.split(target) : this.operations.collapse(target));
+      await this.report(this.operations[kind](target));
     } catch (error) { new Notice(errorMessage(error), 8000); }
   }
 
@@ -229,7 +235,7 @@ class SidebarSettings extends PluginSettingTab {
       items: [
         {
           name: "Experimental sidebar columns",
-          desc: EXPLANATION,
+          desc: EXPLANATION + " Full-width rows below existing columns can form a T-shaped sidebar.",
           aliases: ["warning", "unsupported layouts", "visual risks"]
         },
         {

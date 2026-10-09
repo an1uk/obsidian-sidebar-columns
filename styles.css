@@ -19,11 +19,32 @@
   border-inline-end: 1px solid var(--background-modifier-border);
 }
 .sidebar-columns-restore {
-  margin-top: var(--size-4-2);
+  margin-top: calc(var(--header-height, 40px) + var(--size-4-1));
   width: 28px;
   height: 28px;
 }
 .sidebar-columns-restore:focus-visible {
   outline: 2px solid var(--interactive-accent);
   outline-offset: -2px;
+}
+
+/* Direct column controls stay in their owning native tab bar. */
+.workspace-tab-header-container > .sidebar-columns-collapse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  margin-inline: var(--size-4-1);
+}
+.workspace-tab-header-container > .sidebar-columns-collapse.sidebar-columns-collapse-at-end {
+  margin-right: auto;
+}
+.sidebar-columns-collapse:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+.sidebar-columns-collapse:disabled {
+  opacity: 0.45;
 }

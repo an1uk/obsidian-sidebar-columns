@@ -27,6 +27,7 @@ interface NativeSidebar extends NativeSplit {
 }
 interface NativeTabs extends NativeParent {
   currentTab: number;
+  tabHeaderContainerEl: HTMLElement;
 }
 interface NativeLeaf extends NativeItem {
   tabHeaderEl: HTMLElement;
@@ -41,6 +42,8 @@ interface NativeWorkspace {
   rightSplit: NativeSidebar;
   activeLeaf: WorkspaceLeaf | null;
   createLeafBySplit(leaf: WorkspaceLeaf, direction: 'vertical', before: boolean): WorkspaceLeaf;
+  getLeftLeaf(split: boolean): WorkspaceLeaf | null;
+  getRightLeaf(split: boolean): WorkspaceLeaf | null;
   setActiveLeaf(leaf: WorkspaceLeaf, options?: { focus?: boolean }): void;
   iterateAllLeaves(callback: (leaf: WorkspaceLeaf) => void): void;
   requestResize(): void;
@@ -89,6 +92,18 @@ interface CapturedItem {
   pinned?: boolean;
 }
 type CapturedTree = Map<NativeItem, CapturedItem>;
+interface SidebarActions {
+  addColumn(target: SidebarTarget): void;
+  addRow(target: SidebarTarget): void;
+  split(target: SidebarTarget): void;
+  collapse(target: SidebarTarget): void;
+}
+interface ColumnControl extends Branch {
+  group: NativeTabs;
+  header: HTMLElement;
+  button: HTMLButtonElement;
+  dispose(): void;
+}
 interface Branch {
   branch: NativeItem;
   parent: NativeSplit;
@@ -126,6 +141,8 @@ export class SidebarAdapter {
   private readonly workspace: NativeWorkspace;
   private readonly folds = new Map<NativeItem, Fold>();
   private readonly disposers: (() => void)[] = [];
+  private readonly columnControls = new Map<NativeItem, ColumnControl>();
+  private actions: SidebarActions | null = null;
   private readonly gestureEnds = new Set<() => void>();
   private activeGestures = 0;
   private externalGestureEnd: (() => void) | null = null;
@@ -286,10 +303,11 @@ export class SidebarAdapter {
     return false;
   }
 
-  install(actions: { addColumn: (target: SidebarTarget) => void; split: (target: SidebarTarget) => void; collapse: (target: SidebarTarget) => void }): () => void {
+  install(actions: SidebarActions): () => void {
     if (this.installed) throw new Error('The sidebar adapter is already installed.');
     this.assertCompatible();
     this.installed = true;
+    this.actions = actions;
     try {
       this.disposers.push(wrapMethod(WorkspaceLeaf.prototype, 'onOpenTabHeaderMenu', (original, receiver, args) => {
         let target: SidebarTarget;
@@ -306,6 +324,10 @@ export class SidebarAdapter {
               seenMenus.add(menu);
               menu.addItem(item => item.setTitle('Add full-height column (experimental)').setIcon('columns-2')
                 .onClick(() => actions.addColumn(target)));
+              if (this.rowFactoryAvailable(target.side)) {
+                menu.addItem(item => item.setTitle('Add full-width bottom row (experimental)').setIcon('rows-2')
+                  .onClick(() => actions.addRow(target)));
+              }
               if (!this.nativeSplitAvailable(target)) {
                 menu.addItem(item => item.setTitle('Split this row right (experimental)').setIcon('separator-vertical')
                   .onClick(() => actions.split(target)));
@@ -372,6 +394,13 @@ export class SidebarAdapter {
           })) return;
         this.externalGestureEnd();
       }, true);
+      // Obsidian emits this public event after updating theme/snippet styles.
+      // Recompute physical header flow without expanding existing folds.
+      const cssChange = this.app.workspace.on('css-change', () => {
+        if (this.installed) this.refreshColumnControls();
+      });
+      this.disposers.push(() => this.app.workspace.offref(cssChange));
+      this.refreshColumnControls();
     } catch (error) {
       this.dispose();
       throw error;
@@ -396,6 +425,7 @@ export class SidebarAdapter {
       doc.defaultView?.removeEventListener('blur', end);
       this.gestureEnds.delete(end);
       if (this.externalGestureEnd === end) this.externalGestureEnd = null;
+      this.refreshColumnControls();
     };
     this.gestureEnds.add(end);
     for (const name of events) doc.addEventListener(name, end, true);
@@ -420,6 +450,9 @@ export class SidebarAdapter {
   }
 
   private dispose(): void {
+    this.installed = false;
+    this.actions = null;
+    this.clearColumnControls();
     this.expandAll();
     for (const end of [...this.gestureEnds]) end();
     for (const dispose of this.disposers.splice(0).reverse()) dispose();
@@ -452,20 +485,18 @@ export class SidebarAdapter {
 
   private column(target: SidebarTarget): Branch | null {
     if (!this.isCurrent(target)) return null;
-    const fullHeight = this.fullHeightContent(target.root);
-    const wholeBranch = fullHeight && this.branchIn(target.group, fullHeight);
-    if (fullHeight && wholeBranch) return { branch: wholeBranch, parent: fullHeight };
     let branch: NativeItem = target.group;
+    let outermost: Branch | null = null;
     const seen = new Set<NativeItem>();
     while (branch.parent && branch.parent !== target.root && !seen.has(branch)) {
       seen.add(branch);
       const parent = branch.parent;
       if (isSplit(parent) && (parent as NativeSplit).direction === 'vertical') {
-        return { branch, parent: parent as NativeSplit };
+        outermost = { branch, parent: parent as NativeSplit };
       }
       branch = parent;
     }
-    return null;
+    return outermost;
   }
 
   private foldWindow(doc: Document): NativeDomWindow | null {
@@ -542,6 +573,7 @@ export class SidebarAdapter {
     }
     restore.focus({ preventScroll: true });
     this.workspace.requestResize();
+    this.refreshColumnControls();
   }
 
   private setFoldStyles(fold: Fold, element: HTMLElement, values: Record<string, string>): void {
@@ -619,6 +651,7 @@ export class SidebarAdapter {
         if (target.root === fold.root) this.workspace.setActiveLeaf(target.leaf, { focus: true });
       } catch { this.notice(TARGET_MESSAGE); }
     }
+    this.refreshColumnControls();
   }
 
   expandAll(): void {
@@ -633,6 +666,116 @@ export class SidebarAdapter {
         || (this.workspace.activeLeaf && isInside(nativeItem(this.workspace.activeLeaf), fold.branch))) {
         this.expandFold(fold, false);
       }
+    }
+    this.refreshColumnControls();
+  }
+
+  private clearColumnControls(): void {
+    for (const control of this.columnControls.values()) control.dispose();
+    this.columnControls.clear();
+  }
+
+  private controlTarget(control: ColumnControl): SidebarTarget | null {
+    try {
+      if (!this.installed || !this.actions || control.button.parentElement !== control.header
+        || control.group.tabHeaderContainerEl !== control.header || !control.group.containerEl.contains(control.header)) return null;
+      const active = this.workspace.activeLeaf;
+      const leaf = active && isInside(nativeItem(active), control.branch) ? active
+        : control.group.children[control.group.currentTab] as unknown as WorkspaceLeaf;
+      const target = this.resolveTarget(leaf);
+      const column = this.column(target);
+      return column?.branch === control.branch && column.parent === control.parent ? target : null;
+    } catch { return null; }
+  }
+
+  private refreshColumnControls(): void {
+    const actions = this.actions;
+    if (!this.installed || !actions) { this.clearColumnControls(); return; }
+    const candidates = new Map<NativeItem, { parent: NativeSplit; group: NativeTabs; header: HTMLElement; prepend: boolean }>();
+    try {
+      const ids = new Set<string>();
+      for (const root of [this.workspace.leftSplit, this.workspace.rightSplit]) {
+        this.validateSidebar(root, ids);
+        if (root.collapsed) continue;
+        const walk = (item: NativeItem, column: Branch | null): void => {
+          if (this.foldContaining(item)) return;
+          if (isTabs(item)) {
+            if (!column || column.parent.children.length < 2 || candidates.has(column.branch)) return;
+            const group = item as NativeTabs, header = group.tabHeaderContainerEl;
+            const doc = root.containerEl.ownerDocument, win = this.foldWindow(doc);
+            if (!win || !header || header.ownerDocument !== doc || header.parentElement !== group.containerEl
+              || header.tagName !== 'DIV' || !header.classList.contains('workspace-tab-header-container')
+              || header.getBoundingClientRect().width <= 0 || header.getBoundingClientRect().height <= 0) return;
+            const style = win.getComputedStyle(header);
+            if ((style.flexDirection !== 'row' && style.flexDirection !== 'row-reverse')
+              || (style.direction !== 'ltr' && style.direction !== 'rtl')) return;
+            // Keep controls at the physical left edge, away from native Windows
+            // titlebar buttons, without altering header styles or window chrome.
+            const prepend = (style.direction === 'rtl') === (style.flexDirection === 'row-reverse');
+            candidates.set(column.branch, { parent: column.parent, group, header, prepend });
+            return;
+          }
+          if (!isSplit(item)) return;
+          const split = item as NativeSplit;
+          for (const child of split.children) {
+            walk(child, !column && split !== root && split.direction === 'vertical' ? { branch: child, parent: split } : column);
+          }
+        };
+        walk(root, null);
+      }
+    } catch { this.clearColumnControls(); return; }
+    for (const [branch, control] of this.columnControls) {
+      const candidate = candidates.get(branch);
+      if (!candidate || candidate.parent !== control.parent || candidate.group !== control.group || candidate.header !== control.header
+        || control.button.parentElement !== control.header) {
+        control.dispose(); this.columnControls.delete(branch);
+      }
+    }
+    for (const [branch, candidate] of candidates) {
+      let control = this.columnControls.get(branch);
+      if (!control) {
+        const doc = candidate.header.ownerDocument, win = this.foldWindow(doc);
+        if (!win) continue;
+        const button = win.createEl('button');
+        if (button.ownerDocument !== doc) continue;
+        button.type = 'button'; button.className = 'clickable-icon sidebar-columns-collapse';
+        button.draggable = false; button.setAttribute('data-sidebar-columns-branch-id', branch.id);
+        button.setAttribute('aria-expanded', 'true'); setIcon(button, 'panel-left-close');
+        let own: ColumnControl;
+        const stopPointer = (event: Event): void => { event.stopPropagation(); };
+        const stopDrag = (event: Event): void => { event.preventDefault(); event.stopPropagation(); };
+        const click = (event: Event): void => {
+          event.preventDefault(); event.stopPropagation();
+          if (!this.installed || this.actions !== actions || this.columnControls.get(branch) !== own || button.disabled) return;
+          const target = this.controlTarget(own);
+          if (!target || !this.canCollapse(target)) { this.refreshColumnControls(); return; }
+          actions.collapse(target);
+        };
+        own = { branch, parent: candidate.parent, group: candidate.group, header: candidate.header, button,
+          dispose: () => {
+            button.removeEventListener('pointerdown', stopPointer); button.removeEventListener('mousedown', stopPointer);
+            button.removeEventListener('dragstart', stopDrag); button.removeEventListener('click', click); button.remove();
+          } };
+        button.addEventListener('pointerdown', stopPointer); button.addEventListener('mousedown', stopPointer);
+        button.addEventListener('dragstart', stopDrag); button.addEventListener('click', click);
+        this.columnControls.set(branch, own); control = own;
+      }
+      // The owned modifier anchors appended controls when a theme hides
+      // Obsidian's flexible header spacer; native header styles stay intact.
+      control.button.classList.toggle('sidebar-columns-collapse-at-end', !candidate.prepend);
+      if (candidate.prepend) {
+        if (candidate.header.firstElementChild !== control.button) candidate.header.prepend(control.button);
+      } else {
+        if (candidate.header.lastElementChild !== control.button) candidate.header.appendChild(control.button);
+      }
+      const target = this.controlTarget(control);
+      const canCollapse = Boolean(target && this.canCollapse(target));
+      const lastExpanded = !control.parent.children.some(sibling => sibling !== branch && !this.folds.has(sibling));
+      control.button.disabled = !canCollapse;
+      control.button.setAttribute('aria-disabled', String(!canCollapse));
+      control.button.setAttribute('aria-label', canCollapse ? 'Collapse sidebar column' : lastExpanded
+        ? 'Collapse sidebar column unavailable; keep one column expanded' : 'Collapse sidebar column unavailable during the current operation');
+      control.button.title = canCollapse ? 'Collapse column' : lastExpanded ? 'Keep at least one column expanded' : 'Finish the current sidebar operation first';
     }
   }
 
@@ -674,6 +817,105 @@ export class SidebarAdapter {
       throw new Error('This Obsidian version cannot construct a guarded native sidebar column. The layout was not changed.');
     }
     return split;
+  }
+
+  private rowFactoryAvailable(side: SidebarTarget['side']): boolean {
+    return side === 'left' ? typeof this.workspace.getLeftLeaf === 'function' : typeof this.workspace.getRightLeaf === 'function';
+  }
+
+  async addFullWidthRowBelow(target: SidebarTarget): Promise<void> {
+    if (this.operationRunning || this.isBusyGesture()) throw new Error('Finish the current sidebar operation or drag first.');
+    this.assertCompatible();
+    if (!this.isCurrent(target)) throw new Error('The selected sidebar tab moved or closed. Select it again.');
+    if (!this.rowFactoryAvailable(target.side)) throw new Error('This Obsidian version cannot create a native bottom sidebar row safely. Existing splitting remains available.');
+    if (target.root.collapsed) throw new Error('Open the selected sidebar before adding a row.');
+    this.expandAll();
+    const root = target.root, win = root.containerEl.ownerDocument.defaultView;
+    if (!win) throw new Error('The sidebar window is unavailable.');
+    if (win.getComputedStyle(root.containerEl).flexDirection !== 'column') {
+      throw new Error('The theme changes the native sidebar orientation. Restore native sidebar styling before adding a row.');
+    }
+    const original = this.captureTree(root), children = root.children.slice();
+    const rectangles = children.map(child => child.containerEl.getBoundingClientRect());
+    if (!rectangles.length || rectangles.some(rect => rect.width <= 0 || rect.height <= 0)) throw new Error('The native sidebar content is not visible.');
+    const bounds = { left: Math.min(...rectangles.map(rect => rect.left)), right: Math.max(...rectangles.map(rect => rect.right)),
+      top: Math.min(...rectangles.map(rect => rect.top)), bottom: Math.max(...rectangles.map(rect => rect.bottom)) };
+    const weights = children.map(child => child.dimension ?? 1), total = weights.reduce((sum, weight) => sum + weight, 0);
+    const originalSize = root.size, originalCollapsed = root.collapsed, active = this.workspace.activeLeaf;
+    const originalLeaves = new Set<WorkspaceLeaf>(); this.workspace.iterateAllLeaves(leaf => originalLeaves.add(leaf));
+    let created: WorkspaceLeaf | null = null, group: NativeTabs | null = null, post: CapturedTree | null = null;
+    let postActive: WorkspaceLeaf | null = null;
+    this.operationRunning = true;
+    try {
+      created = target.side === 'left' ? this.workspace.getLeftLeaf(true) : this.workspace.getRightLeaf(true);
+      if (!created || !isLeaf(created) || originalLeaves.has(created)) throw new Error('The native row factory did not return a new tab.');
+      const item = nativeItem(created) as NativeLeaf;
+      if (!isTabs(item.parent)) throw new Error('The returned tab has no safely supported native group.');
+      group = item.parent as NativeTabs; post = this.captureTree(root); postActive = this.workspace.activeLeaf;
+      if (original.has(group) || group.parent !== root || group.children.length !== 1 || group.children[0] !== item
+        || item.view.getViewType() !== 'empty' || item.pinned || !sameItems(root.children, [...children, group])) {
+        throw new Error('Obsidian did not return an owned empty bottom sidebar row.');
+      }
+      // Keep the old rows' relative weights, reserve half of the usable height for
+      // the new row, and leave every nested column/row dimension unchanged.
+      const setOwnedDimension = (node: NativeItem, requested: number): void => {
+        const expected = post?.get(node);
+        try { node.setDimension(requested); }
+        finally {
+          // A cooperating wrapper can apply the native setter and then throw.
+          // Update only this verified own value; never adopt another node's edits.
+          if (expected && node.dimension === requested) expected.dimension = requested;
+        }
+      };
+      children.forEach((child, index) => setOwnedDimension(child, weights[index] / total * 50));
+      setOwnedDimension(group, 50);
+      // Successful owned weight changes are recorded before activation or resize
+      // can throw. A later failure must not mistake these changes for a user edit.
+      try { this.workspace.setActiveLeaf(created, { focus: false }); }
+      finally { if (this.workspace.activeLeaf === created) postActive = created; }
+      this.workspace.requestResize();
+      // Keep the expected tree from before activation/resize. Their callbacks
+      // may contain newer edits that must remain distinct during rollback.
+      await this.nextFrame(win);
+      if ((target.side === 'left' ? this.workspace.leftSplit : this.workspace.rightSplit) !== root) throw new Error('The sidebar workspace was replaced while adding its row.');
+      const next = this.resolveTarget(created);
+      const preserved = [...original].every(([node, saved]) =>
+        (!saved.children || node === root || sameItems((node as NativeParent).children, saved.children))
+        && (saved.direction === undefined || (node as NativeSplit).direction === saved.direction)
+        && (!saved.view || ((node as NativeLeaf).view === saved.view && (node as NativeLeaf).pinned === saved.pinned))
+        && (saved.selected === undefined || (node as NativeTabs).currentTab === saved.selected)
+        && (children.includes(node) || node.dimension === saved.dimension));
+      if (!this.structureMatches(post) || !preserved || next.root !== root || next.group !== group || next.parent !== root
+        || root.size !== originalSize || root.collapsed !== originalCollapsed || group.children.length !== 1 || group.children[0] !== item
+        || item.view.getViewType() !== 'empty' || item.pinned) throw new Error('Obsidian did not preserve the native sidebar while adding its bottom row.');
+      const oldRects = children.map(child => child.containerEl.getBoundingClientRect()), added = group.containerEl.getBoundingClientRect();
+      const oldBottom = Math.max(...oldRects.map(rect => rect.bottom));
+      if (added.width <= 0 || added.height <= 0 || Math.abs(added.left - bounds.left) > 1 || Math.abs(added.right - bounds.right) > 1
+        || added.top < oldBottom - 1 || Math.abs(added.bottom - bounds.bottom) > 1
+        || Math.abs(Math.min(...oldRects.map(rect => rect.top)) - bounds.top) > 1) {
+        throw new Error('The new native row did not render full width beneath the existing sidebar content. The theme may be incompatible.');
+      }
+    } catch (error) {
+      let rollbackError: unknown;
+      try {
+        if (!created || originalLeaves.has(created) || !group || !post) throw new Error('No safely identified operation-owned tab was returned; the layout was not automatically rewritten.');
+        const item = nativeItem(created) as NativeLeaf;
+        if ((target.side === 'left' ? this.workspace.leftSplit : this.workspace.rightSplit) !== root || !this.structureMatches(post)
+          || item.parent !== group || group.parent !== root || group.children.length !== 1 || group.children[0] !== item
+          || item.view.getViewType() !== 'empty' || item.pinned) throw new Error('The added tab moved, changed, or its branch was edited; automatic rollback was stopped.');
+        const ratiosUnchanged = [...post].every(([node, saved]) => node.dimension === saved.dimension);
+        const focusUnchanged = this.workspace.activeLeaf === postActive;
+        item.detach();
+        if (!this.structureMatches(original)) throw new Error('The sidebar changed during removal; automatic rollback was stopped.');
+        if (ratiosUnchanged) for (const [node, saved] of original) node.setDimension(saved.dimension);
+        if (focusUnchanged && this.workspace.activeLeaf === postActive && active && active !== postActive) {
+          let attached = false; this.workspace.iterateAllLeaves(leaf => { if (leaf === active) attached = true; });
+          if (attached) this.workspace.setActiveLeaf(active, { focus: false });
+        }
+        this.workspace.requestResize();
+      } catch (rollback) { rollbackError = rollback; }
+      throw new Error(`${message(error)}${rollbackError ? ` ${message(rollbackError)} Use the layout backup if needed.` : ' The added row was rolled back.'}`);
+    } finally { this.operationRunning = false; this.refreshColumnControls(); }
   }
 
   async addColumn(target: SidebarTarget): Promise<void> {
@@ -852,7 +1094,7 @@ export class SidebarAdapter {
         this.workspace.requestResize();
       } catch (rollback) { rollbackError = rollback; }
       throw new Error(`${message(error)}${rollbackError ? ` ${message(rollbackError)} Use the layout backup if needed.` : ' The added column was rolled back.'}`);
-    } finally { this.operationRunning = false; }
+    } finally { this.operationRunning = false; this.refreshColumnControls(); }
   }
 
   async splitRight(target: SidebarTarget): Promise<void> {
@@ -977,7 +1219,7 @@ export class SidebarAdapter {
         this.workspace.requestResize();
       } catch (rollback) { rollbackError = rollback; }
       throw new Error(`${message(error)}${rollbackError ? ` ${message(rollbackError)} Use the layout backup if needed.` : ' The added column was rolled back.'}`);
-    } finally { this.operationRunning = false; }
+    } finally { this.operationRunning = false; this.refreshColumnControls(); }
   }
   private nextFrame(win: Window): Promise<void> {
     return new Promise(resolve => {

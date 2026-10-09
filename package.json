@@ -1,6 +1,6 @@
 {
   "name": "sidebar-columns",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Experimental native sidebar columns for Obsidian desktop.",
   "license": "0BSD",
@@ -20,7 +20,8 @@
     "test:workspaces": "node scripts/runtime-workspaces.mjs --run",
     "test:full-columns": "node scripts/runtime-full-columns.mjs --run",
     "lint": "eslint \"src/**/*.ts\" --max-warnings 0",
-    "test:review-fix": "node scripts/runtime-review-fix.mjs --run"
+    "test:review-fix": "node scripts/runtime-review-fix.mjs --run",
+    "test:layout-controls": "node scripts/runtime-layout-controls.mjs --run"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
